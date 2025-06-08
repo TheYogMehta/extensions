@@ -1,0 +1,14 @@
+[
+  {
+    "name": "pahe",
+    "version": "1.0.0",
+    "MinAppVersion": "3.2.1",
+    "disabled": false
+  },
+  {
+    "name": "hianime",
+    "version": "1.0.0",
+    "MinAppVersion": "3.2.1",
+    "disabled": false
+  }
+]
