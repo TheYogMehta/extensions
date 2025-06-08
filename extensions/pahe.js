@@ -222,7 +222,7 @@ async function extract(videoUrl) {
 }
 
 module.exports = {
-  name: "animepahe",
+  name: "pahe",
   version: "1.0.0",
   SearchAnime,
   SearchAnime,
