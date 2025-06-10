@@ -1,14 +1,24 @@
-[
-  {
-    "name": "pahe",
-    "version": "1.0.0",
-    "MinAppVersion": "3.2.1",
-    "disabled": false
-  },
-  {
-    "name": "hianime",
-    "version": "1.0.0",
-    "MinAppVersion": "3.2.1",
-    "disabled": false
-  }
-]
+{
+  "Anime": [
+    {
+      "name": "pahe",
+      "version": "1.0.0",
+      "MinAppVersion": "3.2.1",
+      "disabled": false
+    },
+    {
+      "name": "hianime",
+      "version": "1.0.0",
+      "MinAppVersion": "3.2.1",
+      "disabled": false
+    }
+  ],
+  "Manga": [
+    {
+      "name": "weebcentral",
+      "version": "1.0.0",
+      "MinAppVersion": "3.2.1",
+      "disabled": false
+    }
+  ]
+}
