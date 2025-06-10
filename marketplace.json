@@ -3,13 +3,13 @@
     {
       "name": "pahe",
       "version": "1.0.0",
-      "MinAppVersion": "3.2.1",
+      "MinAppVersion": "4.0.0",
       "disabled": false
     },
     {
       "name": "hianime",
       "version": "1.0.0",
-      "MinAppVersion": "3.2.1",
+      "MinAppVersion": "4.0.0",
       "disabled": true
     }
   ],
@@ -17,7 +17,7 @@
     {
       "name": "weebcentral",
       "version": "1.0.0",
-      "MinAppVersion": "3.2.1",
+      "MinAppVersion": "4.0.0",
       "disabled": false
     }
   ]
