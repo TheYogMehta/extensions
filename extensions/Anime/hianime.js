@@ -313,7 +313,10 @@ async function hianimeExtract(videoUrl) {
       subtitles: [],
     };
 
-    const srcsData = await global.RabbitGetSources(videoUrl);
+    const { data: srcsData } = await axios.get(
+      `https://shih.kaoru.cat/sources?url=${videoUrl}`
+    );
+
     if (!srcsData) {
       throw new Error("Url may have an invalid video id");
     }
@@ -395,7 +398,7 @@ async function getVideoUrls(url) {
 
 module.exports = {
   name: "hianime",
-  version: "1.0.0",
+  version: "2.0.0",
   SearchAnime,
   AnimeInfo,
   fetchRecentEpisodes,

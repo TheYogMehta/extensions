@@ -8,9 +8,9 @@
     },
     {
       "name": "hianime",
-      "version": "1.0.0",
-      "MinAppVersion": "4.0.0",
-      "disabled": true
+      "version": "2.0.0",
+      "MinAppVersion": "5.0.2",
+      "disabled": false
     }
   ],
   "Manga": [
