@@ -3,7 +3,7 @@ const cheerio = require("cheerio");
 const axios = require("axios");
 
 // varibles
-const baseUrl = "https://hianime.bz";
+const baseUrl = "http://hianimez.is/";
 
 async function SearchAnime(query, filters = {}) {
   return scrapeCardPage(
@@ -398,7 +398,7 @@ async function getVideoUrls(url) {
 
 module.exports = {
   name: "hianime",
-  version: "2.0.0",
+  version: "3.0.0",
   SearchAnime,
   AnimeInfo,
   fetchRecentEpisodes,
