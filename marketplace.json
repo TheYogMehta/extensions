@@ -10,7 +10,7 @@
       "name": "hianime",
       "version": "3.0.0",
       "MinAppVersion": "5.0.2",
-      "disabled": false
+      "disabled": true
     }
   ],
   "Manga": [
