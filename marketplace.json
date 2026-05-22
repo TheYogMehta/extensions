@@ -1,16 +1,16 @@
 {
   "Anime": [
     {
-      "name": "pahe",
-      "version": "1.0.1",
+      "name": "anikoto",
+      "version": "1.0.0",
       "MinAppVersion": "4.0.0",
       "disabled": false
     },
     {
-      "name": "hianime",
-      "version": "3.0.0",
-      "MinAppVersion": "5.0.2",
-      "disabled": true
+      "name": "pahe",
+      "version": "1.0.2",
+      "MinAppVersion": "4.0.0",
+      "disabled": false
     }
   ],
   "Manga": [
