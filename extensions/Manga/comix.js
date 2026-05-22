@@ -1,12 +1,66 @@
 const cheerio = require("cheerio");
 const baseUrl = "https://comix.to";
 
+let scrapeWithBypass = async (url) => {
+  let electron;
+  try {
+    electron = require("electron");
+  } catch (e) {
+    throw new Error("Electron is required for comix captcha bypass");
+  }
+
+  const { BrowserWindow } = electron;
+  return new Promise((resolve, reject) => {
+    let win = new BrowserWindow({
+      width: 800,
+      height: 600,
+      show: false,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+      }
+    });
+
+    let resolved = false;
+
+    win.on('closed', () => {
+      if (!resolved) {
+        reject(new Error("Window closed before extracting data"));
+      }
+    });
+
+    win.webContents.on('did-finish-load', async () => {
+      try {
+        const title = await win.webContents.executeJavaScript('document.title');
+        if (title.includes('Just a moment')) {
+          // It's Cloudflare challenge, wait for it to solve
+          win.show();
+          return;
+        }
+
+        win.hide();
+
+        const html = await win.webContents.executeJavaScript('document.documentElement.outerHTML');
+        resolved = true;
+        win.close();
+        resolve(html);
+      } catch (err) {
+        resolved = true;
+        win.close();
+        reject(err);
+      }
+    });
+
+    win.loadURL(url);
+  });
+};
+
 async function latestManga(page = 1) {
   if (typeof page === "object") {
     page = page.page || 1;
   }
   try {
-    const html = await global.scrapeURL(
+    const html = await scrapeWithBypass(
       `${baseUrl}/browse?sort=chapter_updated_at&page=${page}`
     );
     const $ = cheerio.load(html);
@@ -48,7 +102,7 @@ async function searchManga(query, page = 1) {
     page = page.page || 1;
   }
   try {
-    const html = await global.scrapeURL(
+    const html = await scrapeWithBypass(
       `${baseUrl}/browse?keyword=${encodeURIComponent(query)}&page=${page}`
     );
     const $ = cheerio.load(html);
@@ -98,7 +152,7 @@ async function fetchMangaInfo(mangaId) {
       released: "",
     };
 
-    const html = await global.scrapeURL(`${baseUrl}/title/${mangaId}`);
+    const html = await scrapeWithBypass(`${baseUrl}/title/${mangaId}`);
     const $ = cheerio.load(html);
 
     mangaInfo.title = $(".mpage__title").text().trim() || $("h1").text().trim();
@@ -127,7 +181,7 @@ async function fetchMangaInfo(mangaId) {
 
 async function fetchChapters(mangaId) {
   try {
-    const html = await global.scrapeURL(`${baseUrl}/title/${mangaId}`);
+    const html = await scrapeWithBypass(`${baseUrl}/title/${mangaId}`);
     const $ = cheerio.load(html);
 
     let chapterLinks = [];
@@ -168,7 +222,7 @@ async function fetchChapters(mangaId) {
 
 async function fetchChapterPages(chapterId) {
   try {
-    const html = await global.scrapeURL(`${baseUrl}/title/${chapterId}`);
+    const html = await scrapeWithBypass(`${baseUrl}/title/${chapterId}`);
     const $ = cheerio.load(html);
 
     const pages = $(".rpage-page__img")
@@ -186,7 +240,7 @@ async function fetchChapterPages(chapterId) {
 
 module.exports = {
   name: "comix",
-  version: "1.0.0",
+  version: "1.0.1",
   latestManga,
   searchManga,
   fetchMangaInfo,
