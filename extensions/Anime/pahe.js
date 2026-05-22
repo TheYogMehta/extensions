@@ -3,13 +3,13 @@ const cheerio = require("cheerio");
 const axios = require("axios");
 
 // variables
-const baseUrl = "https://animepahe.com";
+const baseUrl = "https://animepahe.pw";
 
 // Anime Search
 async function SearchAnime(query, {}) {
   try {
     const data = await global.scrapeURL(
-      `${baseUrl}/api?m=search&q=${encodeURIComponent(query)}`
+      `${baseUrl}/api?m=search&q=${encodeURIComponent(query)}`,
     );
     const res = {
       currentPage: 1,
@@ -31,7 +31,7 @@ async function SearchAnime(query, {}) {
 async function fetchRecentEpisodes(filters = {}) {
   try {
     const data = await global.scrapeURL(
-      `${baseUrl}/api?m=airing&page=${filters.page}`
+      `${baseUrl}/api?m=airing&page=${filters.page}`,
     );
     const res = {
       currentPage: filters.page,
@@ -115,7 +115,7 @@ async function fetchEpisode(id, page = 1) {
     let episodes = [];
 
     let { last_page, data, total } = await global.scrapeURL(
-      `${baseUrl}/api?m=release&id=${id}&sort=episode_desc&page=${page}`
+      `${baseUrl}/api?m=release&id=${id}&sort=episode_desc&page=${page}`,
     );
 
     data.forEach((item) => {
@@ -209,7 +209,7 @@ async function extract(videoUrl) {
       headers: { Referer: baseUrl },
     });
     const source = eval(
-      /(eval)(\(f.*?)(\n<\/script>)/s.exec(data)[2].replace("eval", "")
+      /(eval)(\(f.*?)(\n<\/script>)/s.exec(data)[2].replace("eval", ""),
     ).match(/https.*?m3u8/);
     sources.push({
       url: source[0],
