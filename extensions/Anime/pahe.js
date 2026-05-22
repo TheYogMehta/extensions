@@ -223,7 +223,7 @@ async function extract(videoUrl) {
 
 module.exports = {
   name: "pahe",
-  version: "1.0.1",
+  version: "1.0.2",
   SearchAnime,
   SearchAnime,
   AnimeInfo,

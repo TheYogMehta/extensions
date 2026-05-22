@@ -241,7 +241,7 @@ async function fetchEpisodeSources(episodeIdStr) {
               url: match[0],
               isM3U8: true,
               quality: "auto",
-              isDub: server.type === "dub",
+              isDub: server.type === "dub", headers: { Referer: "https://megaplay.buzz/" },
             };
 
             if (isBoth) {
