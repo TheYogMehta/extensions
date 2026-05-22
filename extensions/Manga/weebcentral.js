@@ -242,7 +242,7 @@ async function fetchChapterPages(chapterId) {
 
 module.exports = {
   name: "weebcentral",
-  version: "1.0.0",
+  version: "1.0.1",
   latestManga,
   searchManga,
   fetchMangaInfo,
