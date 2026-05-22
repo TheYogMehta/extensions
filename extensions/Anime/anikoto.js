@@ -13,7 +13,8 @@ async function SearchAnime(query, {}) {
 
     $("div.item").each((i, el) => {
       const aTag = $(el).find(".name.d-title");
-      const title = aTag.text().trim() || aTag.attr("data-jp");
+      const title =
+        aTag.text().trim() || aTag.attr("data-jp") || aTag.attr("title");
       let href = aTag.attr("href");
       if (!href) return;
       const match = href.match(/\/watch\/([^\/]+)/);
@@ -42,7 +43,7 @@ async function SearchAnime(query, {}) {
 
 async function fetchRecentEpisodes(filters = {}) {
   try {
-    const html = await global.scrapeURL(`${baseUrl}/home`);
+    const html = await global.scrapeURL(`${baseUrl}/latest-updated`);
     const $ = cheerio.load(html);
     const results = [];
 
@@ -53,7 +54,8 @@ async function fetchRecentEpisodes(filters = {}) {
       const title =
         aTag.text().trim() ||
         aTag.attr("data-jp") ||
-        $(el).find(".name.d-title").text().trim();
+        $(el).find(".name.d-title").text().trim() ||
+        aTag.attr("title");
       let href = aTag.attr("href");
 
       if (!href) return;
@@ -123,7 +125,6 @@ async function AnimeInfo(id) {
           animeInfo.status = "Completed";
       }
     });
-
     animeInfo.dataId = dataId;
     animeInfo.subOrDub = suffix;
 
@@ -231,17 +232,25 @@ async function fetchEpisodeSources(episodeIdStr) {
 
         const iframeUrl = linkRes.data.result.url;
         if (iframeUrl) {
-          const html = await global.scrapeURL(iframeUrl);
-          const m3u8Regex =
-            /https:\/\/[a-zA-Z0-9\-\.]+\/[a-zA-Z0-9\/\-\._]+\.m3u8[^"'\s]*/;
-          const match = html.match(m3u8Regex);
+          global.LastM3u8 = null;
+          await global.scrapeURL(iframeUrl);
 
-          if (match && match[0]) {
+          let m3u8Url = null;
+          for (let i = 0; i < 50; i++) {
+            if (global.LastM3u8 && global.LastM3u8.includes(".m3u8")) {
+              m3u8Url = global.LastM3u8;
+              break;
+            }
+            await new Promise((r) => setTimeout(r, 200));
+          }
+
+          if (m3u8Url) {
             const sourceObj = {
-              url: match[0],
+              url: m3u8Url,
               isM3U8: true,
               quality: "auto",
-              isDub: server.type === "dub", headers: { Referer: "https://megaplay.buzz/" },
+              isDub: server.type === "dub",
+              headers: { Referer: "https://megaplay.buzz/" },
             };
 
             if (isBoth) {
