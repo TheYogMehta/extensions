@@ -182,6 +182,57 @@ function decryptTobeparsed(blob) {
   }
 }
 
+let fetchWithCaptchaBypass = async (gql, variables) => {
+  return new Promise(async (resolve, reject) => {
+    if (!global.ScrapperWindow) {
+      return reject(new Error("Global ScrapperWindow is not initialized"));
+    }
+
+    const win = global.ScrapperWindow;
+    
+    try {
+      await win.loadURL("https://allmanga.to/");
+      win.show();
+      
+      let passed = false;
+      for (let i = 0; i < 60; i++) {
+        const title = await win.webContents.executeJavaScript('document.title').catch(() => "");
+        if (title && !title.includes('Just a moment') && !title.includes('Cloudflare')) {
+          passed = true;
+          break;
+        }
+        await new Promise(r => setTimeout(r, 1000));
+      }
+
+      if (!passed) {
+        win.hide();
+        return reject(new Error("Timeout waiting for Cloudflare captcha"));
+      }
+
+      win.hide();
+
+      const code = `
+        fetch("https://api.allanime.day/api", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            query: \`${gql.replace(/\n/g, ' ')}\`,
+            variables: ${JSON.stringify(variables)}
+          })
+        }).then(res => res.json())
+      `;
+
+      const data = await win.webContents.executeJavaScript(code);
+      resolve(data);
+    } catch (err) {
+      win.hide();
+      reject(err);
+    }
+  });
+};
+
 async function fetchChapterPages(chapterId) {
   try {
     let mangaId = "";
@@ -214,13 +265,10 @@ async function fetchChapterPages(chapterId) {
       }
     }`;
 
-    const { data } = await axios.post(apiUrl, {
-      query: gql,
-      variables: {
-        mangaId: mangaId,
-        translationType: "sub",
-        chapterString: chapterString,
-      },
+    const data = await fetchWithCaptchaBypass(gql, {
+      mangaId: mangaId,
+      translationType: "sub",
+      chapterString: chapterString
     });
 
     let edges = [];
@@ -254,6 +302,7 @@ async function fetchChapterPages(chapterId) {
 
     return pages;
   } catch (err) {
+    console.error("fetchChapterPages error:", err);
     return [];
   }
 }

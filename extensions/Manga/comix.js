@@ -2,56 +2,40 @@ const cheerio = require("cheerio");
 const baseUrl = "https://comix.to";
 
 let scrapeWithBypass = async (url) => {
-  let electron;
-  try {
-    electron = require("electron");
-  } catch (e) {
-    throw new Error("Electron is required for comix captcha bypass");
-  }
+  return new Promise(async (resolve, reject) => {
+    if (!global.ScrapperWindow) {
+      return reject(new Error("Global ScrapperWindow is not initialized"));
+    }
 
-  const { BrowserWindow } = electron;
-  return new Promise((resolve, reject) => {
-    let win = new BrowserWindow({
-      width: 800,
-      height: 600,
-      show: false,
-      webPreferences: {
-        nodeIntegration: false,
-        contextIsolation: true,
-      }
-    });
-
-    let resolved = false;
-
-    win.on('closed', () => {
-      if (!resolved) {
-        reject(new Error("Window closed before extracting data"));
-      }
-    });
-
-    win.webContents.on('did-finish-load', async () => {
-      try {
-        const title = await win.webContents.executeJavaScript('document.title');
-        if (title.includes('Just a moment')) {
-          // It's Cloudflare challenge, wait for it to solve
-          win.show();
-          return;
+    const win = global.ScrapperWindow;
+    
+    try {
+      await win.loadURL(url);
+      win.show();
+      
+      let passed = false;
+      for (let i = 0; i < 60; i++) {
+        const title = await win.webContents.executeJavaScript('document.title').catch(() => "");
+        if (title && !title.includes('Just a moment') && !title.includes('Cloudflare')) {
+          passed = true;
+          break;
         }
-
-        win.hide();
-
-        const html = await win.webContents.executeJavaScript('document.documentElement.outerHTML');
-        resolved = true;
-        win.close();
-        resolve(html);
-      } catch (err) {
-        resolved = true;
-        win.close();
-        reject(err);
+        await new Promise(r => setTimeout(r, 1000));
       }
-    });
 
-    win.loadURL(url);
+      if (!passed) {
+        win.hide();
+        return reject(new Error("Timeout waiting for Cloudflare captcha"));
+      }
+
+      win.hide();
+
+      const html = await win.webContents.executeJavaScript('document.documentElement.outerHTML');
+      resolve(html);
+    } catch (err) {
+      win.hide();
+      reject(err);
+    }
   });
 };
 
