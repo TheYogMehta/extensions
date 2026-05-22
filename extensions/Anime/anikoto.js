@@ -14,14 +14,20 @@ async function SearchAnime(query, {}) {
     $("div.item").each((i, el) => {
       const aTag = $(el).find(".name.d-title");
       const title =
-        aTag.text().trim() || aTag.attr("data-jp") || aTag.attr("title");
+        aTag.text().trim() ||
+        aTag.attr("data-jp") ||
+        aTag.attr("title") ||
+        $(el).find(".name.d-title").text().trim() ||
+        $(el).find(".title").text().trim();
       let href = aTag.attr("href");
       if (!href) return;
       const match = href.match(/\/watch\/([^\/]+)/);
       if (!match) return;
       const id = match[1];
 
-      const image = $(el).find(".ani.poster.tip img").attr("src");
+      const image =
+        $(el).find(".ani.poster img").attr("src") ||
+        $(el).find("img").attr("src");
 
       results.push({
         id: id,
@@ -48,22 +54,34 @@ async function fetchRecentEpisodes(filters = {}) {
     const results = [];
 
     $(".item").each((i, el) => {
-      const aTag = $(el).is("a")
-        ? $(el)
-        : $(el).find(".name.d-title, a").first();
+      const aTag = $(el).find(".name.d-title").length
+        ? $(el).find(".name.d-title").first()
+        : $(el).find("a").last();
+      const imgTag = $(el).find("img");
+
       const title =
-        aTag.text().trim() ||
-        aTag.attr("data-jp") ||
         $(el).find(".name.d-title").text().trim() ||
-        aTag.attr("title");
-      let href = aTag.attr("href");
+        $(el).find(".title").text().trim() ||
+        imgTag.attr("title") ||
+        imgTag.attr("alt") ||
+        aTag.attr("title") ||
+        aTag.attr("data-jp") ||
+        aTag
+          .text()
+          .trim()
+          .replace(/TV\s*Sub\s*Dub/i, "")
+          .trim();
+
+      let href = $(el).find("a").first().attr("href") || aTag.attr("href");
 
       if (!href) return;
       const match = href.match(/\/watch\/([^\/]+)/);
       if (!match) return;
       const id = match[1];
 
-      const image = $(el).find(".ani.poster.tip img").attr("src");
+      const image =
+        $(el).find(".ani.poster img").attr("src") ||
+        $(el).find("img").attr("src");
 
       results.push({
         id: id,
@@ -150,7 +168,7 @@ async function fetchEpisode(dataId, page = 1) {
     const $ = cheerio.load(data.result);
     let episodes = [];
 
-    $(".ep-item, li a").each((i, el) => {
+    $("a[data-id][data-ids], .ep-item, li a").each((i, el) => {
       const epNum = $(el).attr("data-num");
       const epId = $(el).attr("data-id");
       const dataIds = $(el).attr("data-ids");

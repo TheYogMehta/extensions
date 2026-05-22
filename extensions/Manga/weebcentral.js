@@ -1,5 +1,10 @@
 const cheerio = require("cheerio");
-const axios = require("axios");
+const axios = require("axios").create({
+  headers: {
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  },
+});
 const baseUrl = "https://weebcentral.com";
 
 async function latestManga(page = 1) {
@@ -49,8 +54,8 @@ async function searchManga(query, page = 1) {
 
     const { data } = await axios.get(
       `${baseUrl}/search/data?limit=32&offset=${offset}&text=${encodeURIComponent(
-        query
-      )}&sort=Best+Match&order=Ascending&official=Any&anime=Any&adult=Any&display_mode=Full+Display`
+        query,
+      )}&sort=Best+Match&order=Ascending&official=Any&anime=Any&adult=Any&display_mode=Full+Display`,
     );
 
     const $ = cheerio.load(data);
@@ -154,7 +159,7 @@ async function fetchMangaInfo(mangaId) {
       const RightSections = Main.eq(0).children("section").eq(1);
 
       const descriptionSection = RightSections.find(
-        "li:has(strong:contains('Description')) p"
+        "li:has(strong:contains('Description')) p",
       );
 
       mangaInfo.description = descriptionSection.length
@@ -171,7 +176,7 @@ async function fetchMangaInfo(mangaId) {
 async function fetchChapters(mangaId) {
   try {
     const { data } = await axios.get(
-      `${baseUrl}/series/${mangaId}/full-chapter-list`
+      `${baseUrl}/series/${mangaId}/full-chapter-list`,
     );
     const $ = cheerio.load(data);
 
@@ -218,7 +223,7 @@ async function fetchChapters(mangaId) {
 async function fetchChapterPages(chapterId) {
   try {
     const { data } = await axios.get(
-      `${baseUrl}/chapters/${chapterId}/images?is_prev=False&current_page=1&reading_style=long_strip`
+      `${baseUrl}/chapters/${chapterId}/images?is_prev=False&current_page=1&reading_style=long_strip`,
     );
     const $ = cheerio.load(data);
 
