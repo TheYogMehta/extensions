@@ -41,6 +41,7 @@ async function fetchRecentEpisodes(filters = {}) {
         id: `${item.anime_session}`,
         title: item.anime_title,
         image: item?.snapshot ? item?.snapshot : null,
+        episode: item.episode,
       })),
     };
     return res;
@@ -205,11 +206,13 @@ function extractQualityNumber(qualityString) {
 async function extract(videoUrl) {
   let sources = [];
   try {
-    const { data } = await axios.get(`${videoUrl.href}`, {
-      headers: { Referer: baseUrl },
-    });
+    const data = await global.scrapeURL(videoUrl.href);
+    const match = /(eval)(\(f.*?)(<\/script>)/s.exec(data);
+    if (!match) {
+      throw new Error("Failed to find video source packer block");
+    }
     const source = eval(
-      /(eval)(\(f.*?)(\n<\/script>)/s.exec(data)[2].replace("eval", ""),
+      match[2].replace("eval", ""),
     ).match(/https.*?m3u8/);
     sources.push({
       url: source[0],
