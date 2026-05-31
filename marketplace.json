@@ -3,13 +3,13 @@
     {
       "name": "anikoto",
       "version": "1.0.0",
-      "MinAppVersion": "5.0.0",
+      "MinAppVersion": "6.0.0",
       "disabled": false
     },
     {
       "name": "pahe",
       "version": "1.0.2",
-      "MinAppVersion": "5.0.0",
+      "MinAppVersion": "6.0.0",
       "disabled": false
     }
   ],
@@ -17,13 +17,13 @@
     {
       "name": "weebcentral",
       "version": "1.0.0",
-      "MinAppVersion": "4.0.0",
+      "MinAppVersion": "6.0.0",
       "disabled": false
     },
     {
       "name": "allmanga",
       "version": "1.0.0",
-      "MinAppVersion": "4.0.0",
+      "MinAppVersion": "6.0.0",
       "disabled": false
     }
   ]
