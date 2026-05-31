@@ -21,12 +21,6 @@
       "disabled": false
     },
     {
-      "name": "comix",
-      "version": "1.0.0",
-      "MinAppVersion": "4.0.0",
-      "disabled": false
-    },
-    {
       "name": "allmanga",
       "version": "1.0.0",
       "MinAppVersion": "4.0.0",
