@@ -1,12 +1,49 @@
 const cheerio = require("cheerio");
-const axios = require("axios");
 
 const baseUrl = "https://anikototv.to";
 
-async function SearchAnime(query, {}) {
+function parsePagination($, defaultPage) {
+  let totalPages = 1;
+  $(".pagination a").each((i, el) => {
+    const href = $(el).attr("href");
+    if (href) {
+      const match = href.match(/page=(\d+)/);
+      if (match) {
+        const pageNum = parseInt(match[1]);
+        if (pageNum > totalPages) {
+          totalPages = pageNum;
+        }
+      }
+    }
+  });
+
+  let hasNextPage = false;
+  $(".pagination a").each((i, el) => {
+    const rel = $(el).attr("rel");
+    if (rel === "next") {
+      hasNextPage = true;
+    }
+  });
+
+  const activePageText = $(
+    ".pagination li.active, .pagination li.page-item.active",
+  )
+    .text()
+    .trim();
+  const currentPage = parseInt(activePageText) || defaultPage || 1;
+
+  return {
+    currentPage,
+    hasNextPage,
+    totalPages,
+  };
+}
+
+async function SearchAnime(query, filters = {}) {
   try {
-    const html = await global.scrapeURL(
-      `${baseUrl}/search?keyword=${encodeURIComponent(query)}`,
+    const page = filters?.page || 1;
+    const { data: html } = await global.axios.get(
+      `${baseUrl}/search?keyword=${encodeURIComponent(query)}&page=${page}`,
     );
     const $ = cheerio.load(html);
     const results = [];
@@ -36,10 +73,12 @@ async function SearchAnime(query, {}) {
       });
     });
 
+    const pagination = parsePagination($, page);
+
     return {
-      currentPage: 1,
-      hasNextPage: false,
-      totalPages: 1,
+      currentPage: pagination.currentPage,
+      hasNextPage: pagination.hasNextPage,
+      totalPages: pagination.totalPages,
       results: results,
     };
   } catch (err) {
@@ -49,7 +88,10 @@ async function SearchAnime(query, {}) {
 
 async function fetchRecentEpisodes(filters = {}) {
   try {
-    const html = await global.scrapeURL(`${baseUrl}/latest-updated`);
+    const page = filters?.page || 1;
+    const { data: html } = await global.axios.get(
+      `${baseUrl}/latest-updated?page=${page}`,
+    );
     const $ = cheerio.load(html);
     const results = [];
 
@@ -90,10 +132,12 @@ async function fetchRecentEpisodes(filters = {}) {
       });
     });
 
+    const pagination = parsePagination($, page);
+
     return {
-      currentPage: 1,
-      hasNextPage: false,
-      totalPages: 1,
+      currentPage: pagination.currentPage,
+      hasNextPage: pagination.hasNextPage,
+      totalPages: pagination.totalPages,
       results: results,
     };
   } catch (err) {
@@ -111,7 +155,7 @@ async function AnimeInfo(id) {
   };
 
   try {
-    const html = await global.scrapeURL(`${baseUrl}/watch/${id}`);
+    const { data: html } = await global.axios.get(`${baseUrl}/watch/${id}`);
     const $ = cheerio.load(html);
 
     const dataId = $("#watch-main").attr("data-id");
@@ -156,12 +200,9 @@ async function AnimeInfo(id) {
 async function fetchEpisode(dataId, page = 1) {
   try {
     const url = `${baseUrl}/ajax/episode/list/${dataId}`;
-    const { data } = await axios.get(url, {
+    const { data } = await global.axios.get(url, {
       headers: {
         "X-Requested-With": "XMLHttpRequest",
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        Referer: `${baseUrl}/`,
       },
     });
 
@@ -178,12 +219,21 @@ async function fetchEpisode(dataId, page = 1) {
         `Episode ${epNum}`;
 
       if (epId && dataIds) {
+        const hasSub = $(el).attr("data-sub") === "1";
+        const hasDub = $(el).attr("data-dub") === "1";
+        let lang = "sub";
+        if (hasSub && hasDub) {
+          lang = "both";
+        } else if (hasDub) {
+          lang = "dub";
+        }
+
         episodes.push({
           id: `${epId}|${dataIds}`,
           number: parseFloat(epNum),
           title: title,
           duration: "Unknown",
-          lang: "both",
+          lang: lang,
         });
       }
     });
@@ -199,6 +249,76 @@ async function fetchEpisode(dataId, page = 1) {
   }
 }
 
+async function fetchSubtitlesFromServer(server, failedDomains) {
+  if (!server || !server.linkId) return null;
+  let domain = null;
+  try {
+    const getUrl = `${baseUrl}/ajax/server?get=${server.linkId}`;
+    const linkRes = await global.axios.get(getUrl, {
+      headers: {
+        "X-Requested-With": "XMLHttpRequest",
+      },
+    });
+
+    const iframeUrl = linkRes.data.result.url;
+    if (iframeUrl) {
+      try {
+        domain = new URL(iframeUrl).origin;
+        if (failedDomains && failedDomains.has(domain)) {
+          return null;
+        }
+      } catch (e) {}
+
+      const iframeRes = await global.axios.get(iframeUrl, {
+        headers: {
+          Referer: baseUrl,
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        },
+        timeout: 2500,
+      });
+      const $iframe = cheerio.load(iframeRes.data);
+      const playerDbId = $iframe("#megaplay-player").attr("data-id");
+      if (playerDbId) {
+        const sourcesUrl = `${domain}/stream/getSources?id=${playerDbId}`;
+        const sourcesRes = await global.axios.get(sourcesUrl, {
+          headers: {
+            Referer: iframeUrl,
+            "X-Requested-With": "XMLHttpRequest",
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+          },
+          timeout: 2500,
+        });
+
+        if (sourcesRes.data && sourcesRes.data.tracks) {
+          const subtitles = (sourcesRes.data.tracks || [])
+            .filter(
+              (t) =>
+                t.file && (t.kind === "captions" || t.kind === "subtitles"),
+            )
+            .map((t) => ({
+              url: t.file,
+              lang: t.label || "English",
+            }));
+          if (subtitles.length > 0) {
+            return subtitles;
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error(
+      `Failed to fetch fallback subtitles from ${server.name}:`,
+      err.message,
+    );
+    if (domain && failedDomains) {
+      failedDomains.add(domain);
+    }
+  }
+  return null;
+}
+
 async function fetchEpisodeSources(episodeIdStr) {
   try {
     const isBoth = episodeIdStr.endsWith("both");
@@ -210,12 +330,9 @@ async function fetchEpisodeSources(episodeIdStr) {
     const dataIds = parts[1];
 
     const serverUrl = `${baseUrl}/ajax/server/list?servers=${dataIds}`;
-    const serverRes = await axios.get(serverUrl, {
+    const serverRes = await global.axios.get(serverUrl, {
       headers: {
         "X-Requested-With": "XMLHttpRequest",
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        Referer: `${baseUrl}/`,
       },
     });
 
@@ -226,63 +343,253 @@ async function fetchEpisodeSources(episodeIdStr) {
     if (isBoth) iSource = { dub: { sources: [] }, sub: { sources: [] } };
 
     const servers = [];
+    const subServers = [];
     $(".type[data-type='sub'] li, .type[data-type='dub'] li").each((i, el) => {
-      servers.push({
-        type: $(el).closest(".type").attr("data-type"),
+      const type = $(el).closest(".type").attr("data-type");
+      const serverObj = {
+        type: type,
         linkId: $(el).attr("data-link-id"),
         name: $(el).text().trim(),
-      });
+      };
+      if (type === "sub") {
+        subServers.push(serverObj);
+      }
+      if (!isBoth) {
+        if (isDub && type !== "dub") return;
+        if (!isDub && type !== "sub") return;
+      }
+      servers.push(serverObj);
     });
+
+    const failedDomains = new Set();
 
     for (const server of servers) {
       if (!server.linkId) continue;
 
       try {
         const getUrl = `${baseUrl}/ajax/server?get=${server.linkId}`;
-        const linkRes = await axios.get(getUrl, {
+        const linkRes = await global.axios.get(getUrl, {
           headers: {
             "X-Requested-With": "XMLHttpRequest",
-            "User-Agent":
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            Referer: `${baseUrl}/`,
           },
         });
 
         const iframeUrl = linkRes.data.result.url;
         if (iframeUrl) {
-          global.LastM3u8 = null;
-          await global.scrapeURL(iframeUrl);
+          let domain = null;
+          try {
+            domain = new URL(iframeUrl).origin;
+          } catch (e) {}
 
-          let m3u8Url = null;
-          for (let i = 0; i < 50; i++) {
-            if (global.LastM3u8 && global.LastM3u8.includes(".m3u8")) {
-              m3u8Url = global.LastM3u8;
-              break;
-            }
-            await new Promise((r) => setTimeout(r, 200));
+          if (domain && failedDomains.has(domain)) {
+            console.log(
+              `Skipping server ${server.name} because its domain is marked as failed/down.`,
+            );
+            continue;
           }
 
-          if (m3u8Url) {
-            const sourceObj = {
-              url: m3u8Url,
-              isM3U8: true,
-              quality: "auto",
-              isDub: server.type === "dub",
-              headers: { Referer: "https://megaplay.buzz/" },
-            };
+          let directFetchSuccess = false;
+          try {
+            const iframeRes = await global.axios.get(iframeUrl, {
+              headers: {
+                Referer: baseUrl,
+                "User-Agent":
+                  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+              },
+              timeout: 3000,
+            });
+            const $iframe = cheerio.load(iframeRes.data);
+            const playerDbId = $iframe("#megaplay-player").attr("data-id");
+            if (playerDbId) {
+              const domainName = new URL(iframeUrl).origin;
+              const sourcesUrl = `${domainName}/stream/getSources?id=${playerDbId}`;
+              const sourcesRes = await global.axios.get(sourcesUrl, {
+                headers: {
+                  Referer: iframeUrl,
+                  "X-Requested-With": "XMLHttpRequest",
+                  "User-Agent":
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                },
+                timeout: 3000,
+              });
 
-            if (isBoth) {
-              if (sourceObj.isDub) iSource.dub.sources.push(sourceObj);
-              else iSource.sub.sources.push(sourceObj);
-            } else {
-              if (isDub && sourceObj.isDub) iSource.sources.push(sourceObj);
-              else if (!isDub && !sourceObj.isDub)
-                iSource.sources.push(sourceObj);
+              if (sourcesRes.data && sourcesRes.data.sources) {
+                const m3u8Url =
+                  sourcesRes.data.sources.file ||
+                  (Array.isArray(sourcesRes.data.sources)
+                    ? sourcesRes.data.sources[0]?.file
+                    : null);
+                if (m3u8Url) {
+                  const subtitles = (sourcesRes.data.tracks || [])
+                    .filter(
+                      (t) =>
+                        t.file &&
+                        (t.kind === "captions" || t.kind === "subtitles"),
+                    )
+                    .map((t) => ({
+                      url: t.file,
+                      lang: t.label || "English",
+                    }));
+
+                  const sourceObj = {
+                    url: m3u8Url,
+                    isM3U8: true,
+                    quality: server.name || "auto",
+                    isDub: server.type === "dub",
+                    headers: { Referer: domainName + "/" },
+                  };
+
+                  if (isBoth) {
+                    if (sourceObj.isDub) {
+                      iSource.dub.sources.push(sourceObj);
+                      if (subtitles && subtitles.length > 0) {
+                        iSource.dub.subtitles = subtitles;
+                      }
+                    } else {
+                      iSource.sub.sources.push(sourceObj);
+                      if (subtitles && subtitles.length > 0) {
+                        iSource.sub.subtitles = subtitles;
+                      }
+                    }
+                    if (subtitles && subtitles.length > 0) {
+                      if (
+                        !iSource.subtitles ||
+                        iSource.subtitles.length === 0
+                      ) {
+                        iSource.subtitles = subtitles;
+                      }
+                    }
+                  } else {
+                    if (isDub && sourceObj.isDub) {
+                      iSource.sources.push(sourceObj);
+                      if (subtitles && subtitles.length > 0) {
+                        iSource.subtitles = subtitles;
+                      }
+                    } else if (!isDub && !sourceObj.isDub) {
+                      iSource.sources.push(sourceObj);
+                      if (subtitles && subtitles.length > 0) {
+                        iSource.subtitles = subtitles;
+                      }
+                    }
+                  }
+                  directFetchSuccess = true;
+                }
+              }
+            }
+          } catch (err) {
+            console.error(
+              "Direct fetch failed, falling back to ScrapperWindow:",
+              err.message,
+            );
+            const isTimeout =
+              err.code === "ECONNABORTED" ||
+              err.message?.toLowerCase().includes("timeout");
+            const isConnectionError =
+              !err.response ||
+              err.code === "ENOTFOUND" ||
+              err.code === "ECONNREFUSED" ||
+              (err.response.status >= 500 &&
+                err.response.status <= 599 &&
+                err.response.status !== 503);
+            if (iframeUrl && (isTimeout || isConnectionError)) {
+              try {
+                const domainName = new URL(iframeUrl).origin;
+                failedDomains.add(domainName);
+              } catch (e) {}
+            }
+          }
+
+          if (!directFetchSuccess) {
+            let shouldScrap = true;
+            try {
+              const domainName = new URL(iframeUrl).origin;
+              if (failedDomains.has(domainName)) {
+                shouldScrap = false;
+              }
+            } catch (e) {}
+
+            if (shouldScrap && global.ScrapperWindow) {
+              global.LastM3u8 = null;
+              await global.ScrapperWindow.loadURL(iframeUrl).catch(() => {});
+
+              let m3u8Url = null;
+              for (let i = 0; i < 50; i++) {
+                if (global.LastM3u8 && global.LastM3u8.includes(".m3u8")) {
+                  m3u8Url = global.LastM3u8;
+                  break;
+                }
+                await new Promise((r) => setTimeout(r, 200));
+              }
+
+              if (m3u8Url) {
+                const sourceObj = {
+                  url: m3u8Url,
+                  isM3U8: true,
+                  quality: server.name || "auto",
+                  isDub: server.type === "dub",
+                  headers: { Referer: "https://megaplay.buzz/" },
+                };
+
+                if (isBoth) {
+                  if (sourceObj.isDub) iSource.dub.sources.push(sourceObj);
+                  else iSource.sub.sources.push(sourceObj);
+                } else {
+                  if (isDub && sourceObj.isDub) iSource.sources.push(sourceObj);
+                  else if (!isDub && !sourceObj.isDub)
+                    iSource.sources.push(sourceObj);
+                }
+              }
+            } else if (!shouldScrap) {
+              console.log(
+                `Skipped ScrapperWindow rendering for failed domain: ${iframeUrl}`,
+              );
             }
           }
         }
       } catch (e) {
         console.error(e);
+      }
+    }
+
+    // Fallback logic for subtitles if they are empty
+    if (isBoth) {
+      if (
+        (!iSource.dub.subtitles || iSource.dub.subtitles.length === 0) &&
+        iSource.sub.subtitles &&
+        iSource.sub.subtitles.length > 0
+      ) {
+        iSource.dub.subtitles = iSource.sub.subtitles;
+      }
+      if (
+        (!iSource.sub.subtitles || iSource.sub.subtitles.length === 0) &&
+        iSource.dub.subtitles &&
+        iSource.dub.subtitles.length > 0
+      ) {
+        iSource.sub.subtitles = iSource.dub.subtitles;
+      }
+      if (
+        (!iSource.dub.subtitles || iSource.dub.subtitles.length === 0) &&
+        (!iSource.sub.subtitles || iSource.sub.subtitles.length === 0)
+      ) {
+        for (const subServer of subServers) {
+          const subs = await fetchSubtitlesFromServer(subServer, failedDomains);
+          if (subs && subs.length > 0) {
+            iSource.dub.subtitles = subs;
+            iSource.sub.subtitles = subs;
+            iSource.subtitles = subs;
+            break;
+          }
+        }
+      }
+    } else {
+      if (!iSource.subtitles || iSource.subtitles.length === 0) {
+        for (const subServer of subServers) {
+          const subs = await fetchSubtitlesFromServer(subServer, failedDomains);
+          if (subs && subs.length > 0) {
+            iSource.subtitles = subs;
+            break;
+          }
+        }
       }
     }
 
@@ -295,7 +602,7 @@ async function fetchEpisodeSources(episodeIdStr) {
 
 module.exports = {
   name: "anikoto",
-  version: "1.0.0",
+  version: "2.0.0",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,

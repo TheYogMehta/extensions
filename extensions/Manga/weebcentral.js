@@ -1,15 +1,11 @@
 const cheerio = require("cheerio");
-const axios = require("axios").create({
-  headers: {
-    "User-Agent":
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-  },
-});
 const baseUrl = "https://weebcentral.com";
 
 async function latestManga(page = 1) {
   try {
-    const { data } = await axios.get(`${baseUrl}/latest-updates/${page}`);
+    const { data } = await global.axios.get(
+      `${baseUrl}/latest-updates/${page}`,
+    );
     const $ = cheerio.load(data);
 
     const latestMangas = [];
@@ -31,7 +27,7 @@ async function latestManga(page = 1) {
             latestMangas.push({
               id: id,
               title: title,
-              image: image,
+              image: `/api/image?url=${image}`,
             });
           }
         }
@@ -52,7 +48,7 @@ async function searchManga(query, page = 1) {
   try {
     const offset = (page - 1) * 32;
 
-    const { data } = await axios.get(
+    const { data } = await global.axios.get(
       `${baseUrl}/search/data?limit=32&offset=${offset}&text=${encodeURIComponent(
         query,
       )}&sort=Best+Match&order=Ascending&official=Any&anime=Any&adult=Any&display_mode=Full+Display`,
@@ -82,7 +78,7 @@ async function searchManga(query, page = 1) {
                 results.push({
                   id: id,
                   title: title,
-                  image: image,
+                  image: `/api/image?url=${image}`,
                 });
               }
             }
@@ -111,7 +107,7 @@ async function fetchMangaInfo(mangaId) {
       released: "",
     };
 
-    const { data } = await axios.get(`${baseUrl}/series/${mangaId}`);
+    const { data } = await global.axios.get(`${baseUrl}/series/${mangaId}`);
     const $ = cheerio.load(data);
     const Main = $("main > div > section");
 
@@ -124,7 +120,7 @@ async function fetchMangaInfo(mangaId) {
         ?.text()
         ?.trim()
         ?.toLowerCase();
-      mangaInfo.image = LeftSections.find("picture > img").attr("src");
+      mangaInfo.image = `/api/image?url=${LeftSections.find("picture > img").attr("src")}`;
       // extra info
       LeftSections.find("section")
         .eq(2)
@@ -175,7 +171,7 @@ async function fetchMangaInfo(mangaId) {
 
 async function fetchChapters(mangaId) {
   try {
-    const { data } = await axios.get(
+    const { data } = await global.axios.get(
       `${baseUrl}/series/${mangaId}/full-chapter-list`,
     );
     const $ = cheerio.load(data);
@@ -222,7 +218,7 @@ async function fetchChapters(mangaId) {
 
 async function fetchChapterPages(chapterId) {
   try {
-    const { data } = await axios.get(
+    const { data } = await global.axios.get(
       `${baseUrl}/chapters/${chapterId}/images?is_prev=False&current_page=1&reading_style=long_strip`,
     );
     const $ = cheerio.load(data);
@@ -230,7 +226,7 @@ async function fetchChapterPages(chapterId) {
     const pages = $("img")
       .map((index, img) => ({
         page: index + 1,
-        img: `${$(img).attr("src")}`,
+        img: `/api/image?url=${$(img).attr("src")}`,
       }))
       .get();
 
@@ -240,20 +236,12 @@ async function fetchChapterPages(chapterId) {
   }
 }
 
-async function getHeaders() {
-  return {
-    Referer: "https://weebcentral.com/",
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-  };
-}
-
 module.exports = {
   name: "weebcentral",
-  version: "1.0.1",
+  version: "2.0.0",
   latestManga,
   searchManga,
   fetchMangaInfo,
   fetchChapters,
   fetchChapterPages,
-  getHeaders,
 };
