@@ -173,21 +173,25 @@ async function fetchEpisodeSources(episodeId) {
       };
 
     for (const link of links) {
-      const res = await extract(new URL(link.url));
-      res[0].quality = link.quality;
-      res[0].isDub = link.audio === "eng";
-      if (isBoth) {
-        if (res[0]?.isDub) {
-          iSource.dub.sources.push(res[0]);
-        } else if (!res[0]?.isDub) {
-          iSource.sub.sources.push(res[0]);
+      try {
+        const res = await extract(new URL(link.url));
+        res[0].quality = link.quality;
+        res[0].isDub = link.audio === "eng";
+        if (isBoth) {
+          if (res[0]?.isDub) {
+            iSource.dub.sources.push(res[0]);
+          } else if (!res[0]?.isDub) {
+            iSource.sub.sources.push(res[0]);
+          }
+        } else {
+          if (isDub && res[0].isDub) {
+            iSource.sources.push(res[0]);
+          } else if (!isDub && !res[0].isDub) {
+            iSource.sources.push(res[0]);
+          }
         }
-      } else {
-        if (isDub && res[0].isDub) {
-          iSource.sources.push(res[0]);
-        } else if (!isDub && !res[0].isDub) {
-          iSource.sources.push(res[0]);
-        }
+      } catch (innerErr) {
+        console.error(`Failed to extract link ${link.url}:`, innerErr.message);
       }
     }
     return iSource;
@@ -204,22 +208,30 @@ function extractQualityNumber(qualityString) {
 }
 
 // helpers for extracting video links
-async function extract(videoUrl) {
+async function extract(videoUrl, retries = 2, delay = 1000) {
   let sources = [];
-  try {
-    const { data } = await global.axios.get(videoUrl.href);
-    const match = /(eval)(\(f.*?)(<\/script>)/s.exec(data);
-    if (!match) {
-      throw new Error("Failed to find video source packer block");
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const { data } = await global.axios.get(videoUrl.href);
+      const match = /(eval)(\(f.*?)(<\/script>)/s.exec(data);
+      if (!match) {
+        throw new Error("Failed to find video source packer block");
+      }
+      const source = eval(match[2].replace("eval", "")).match(/https.*?m3u8/);
+      sources.push({
+        url: source[0],
+        isM3U8: source[0].includes(".m3u8"),
+      });
+      return sources;
+    } catch (err) {
+      if ((err.response?.status === 429 || err.message.includes("429")) && attempt < retries) {
+        console.warn(`Request to ${videoUrl.href} returned 429. Retrying in ${delay}ms (attempt ${attempt}/${retries})...`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        delay *= 2;
+        continue;
+      }
+      throw new Error(err.message);
     }
-    const source = eval(match[2].replace("eval", "")).match(/https.*?m3u8/);
-    sources.push({
-      url: source[0],
-      isM3U8: source[0].includes(".m3u8"),
-    });
-    return sources;
-  } catch (err) {
-    throw new Error(err.message);
   }
 }
 
