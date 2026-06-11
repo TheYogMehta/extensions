@@ -249,47 +249,24 @@ async function fetchEpisode(dataId, page = 1) {
   }
 }
 
-async function fetchSubtitlesFromServer(server, failedDomains) {
+async function fetchSubtitlesFromServer(server) {
   if (!server || !server.linkId) return null;
-  let domain = null;
   try {
     const getUrl = `${baseUrl}/ajax/server?get=${server.linkId}`;
-    const linkRes = await global.axios.get(getUrl, {
-      headers: {
-        "X-Requested-With": "XMLHttpRequest",
-      },
-    });
+    const linkRes = await global.axios.get(getUrl);
 
-    const iframeUrl = linkRes.data.result.url;
+    const iframeUrl = linkRes.data?.result?.url;
     if (iframeUrl) {
-      try {
-        domain = new URL(iframeUrl).origin;
-        if (failedDomains && failedDomains.has(domain)) {
-          return null;
-        }
-      } catch (e) {}
-
-      const iframeRes = await global.axios.get(iframeUrl, {
-        headers: {
-          Referer: baseUrl,
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        },
-        timeout: 2500,
-      });
+      const iframeRes = await global.axios.get(iframeUrl, { timeout: 2500 });
       const $iframe = cheerio.load(iframeRes.data);
       const playerDbId = $iframe("#megaplay-player").attr("data-id");
       if (playerDbId) {
-        const sourcesUrl = `${domain}/stream/getSources?id=${playerDbId}`;
-        const sourcesRes = await global.axios.get(sourcesUrl, {
-          headers: {
-            Referer: iframeUrl,
-            "X-Requested-With": "XMLHttpRequest",
-            "User-Agent":
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        const sourcesRes = await global.axios.get(
+          `${new URL(iframeUrl).origin}/stream/getSources?id=${playerDbId}`,
+          {
+            timeout: 2500,
           },
-          timeout: 2500,
-        });
+        );
 
         if (sourcesRes.data && sourcesRes.data.tracks) {
           const subtitles = (sourcesRes.data.tracks || [])
@@ -312,9 +289,57 @@ async function fetchSubtitlesFromServer(server, failedDomains) {
       `Failed to fetch fallback subtitles from ${server.name}:`,
       err.message,
     );
-    if (domain && failedDomains) {
-      failedDomains.add(domain);
+  }
+  return null;
+}
+
+async function processServer(server) {
+  if (!server || !server.linkId) return null;
+  try {
+    const getUrl = `${baseUrl}/ajax/server?get=${server.linkId}`;
+    const linkRes = await global.axios.get(getUrl);
+    const iframeUrl = linkRes.data?.result?.url;
+    if (!iframeUrl) return null;
+
+    const iframeRes = await global.axios.get(iframeUrl, { timeout: 3000 });
+    const $iframe = cheerio.load(iframeRes.data);
+    const playerDbId = $iframe("#megaplay-player").attr("data-id");
+    if (!playerDbId) return null;
+
+    const domainName = new URL(iframeUrl).origin;
+    const sourcesRes = await global.axios.get(
+      `${domainName}/stream/getSources?id=${playerDbId}`,
+      { timeout: 3000 },
+    );
+
+    if (sourcesRes.data && sourcesRes.data.sources) {
+      const m3u8Url =
+        sourcesRes.data.sources.file ||
+        (Array.isArray(sourcesRes.data.sources)
+          ? sourcesRes.data.sources[0]?.file
+          : null);
+      if (m3u8Url) {
+        const subtitles = (sourcesRes.data.tracks || [])
+          .filter(
+            (t) => t.file && (t.kind === "captions" || t.kind === "subtitles"),
+          )
+          .map((t) => ({
+            url: t.file,
+            lang: t.label || "English",
+          }));
+
+        return {
+          url: m3u8Url,
+          isM3U8: true,
+          quality: server.name || "auto",
+          isDub: server.type === "dub",
+          headers: { Referer: domainName + "/" },
+          subtitles: subtitles,
+        };
+      }
     }
+  } catch (err) {
+    console.error(`Failed to process server ${server.name}:`, err.message);
   }
   return null;
 }
@@ -330,11 +355,7 @@ async function fetchEpisodeSources(episodeIdStr) {
     const dataIds = parts[1];
 
     const serverUrl = `${baseUrl}/ajax/server/list?servers=${dataIds}`;
-    const serverRes = await global.axios.get(serverUrl, {
-      headers: {
-        "X-Requested-With": "XMLHttpRequest",
-      },
-    });
+    const serverRes = await global.axios.get(serverUrl);
 
     const $ = cheerio.load(serverRes.data.result);
 
@@ -361,193 +382,47 @@ async function fetchEpisodeSources(episodeIdStr) {
       servers.push(serverObj);
     });
 
-    const failedDomains = new Set();
-
-    for (const server of servers) {
-      if (!server.linkId) continue;
-
-      try {
-        const getUrl = `${baseUrl}/ajax/server?get=${server.linkId}`;
-        const linkRes = await global.axios.get(getUrl, {
-          headers: {
-            "X-Requested-With": "XMLHttpRequest",
-          },
-        });
-
-        const iframeUrl = linkRes.data.result.url;
-        if (iframeUrl) {
-          let domain = null;
-          try {
-            domain = new URL(iframeUrl).origin;
-          } catch (e) {}
-
-          if (domain && failedDomains.has(domain)) {
-            console.log(
-              `Skipping server ${server.name} because its domain is marked as failed/down.`,
-            );
-            continue;
-          }
-
-          let directFetchSuccess = false;
-          try {
-            const iframeRes = await global.axios.get(iframeUrl, {
-              headers: {
-                Referer: baseUrl,
-                "User-Agent":
-                  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-              },
-              timeout: 3000,
-            });
-            const $iframe = cheerio.load(iframeRes.data);
-            const playerDbId = $iframe("#megaplay-player").attr("data-id");
-            if (playerDbId) {
-              const domainName = new URL(iframeUrl).origin;
-              const sourcesUrl = `${domainName}/stream/getSources?id=${playerDbId}`;
-              const sourcesRes = await global.axios.get(sourcesUrl, {
-                headers: {
-                  Referer: iframeUrl,
-                  "X-Requested-With": "XMLHttpRequest",
-                  "User-Agent":
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-                },
-                timeout: 3000,
-              });
-
-              if (sourcesRes.data && sourcesRes.data.sources) {
-                const m3u8Url =
-                  sourcesRes.data.sources.file ||
-                  (Array.isArray(sourcesRes.data.sources)
-                    ? sourcesRes.data.sources[0]?.file
-                    : null);
-                if (m3u8Url) {
-                  const subtitles = (sourcesRes.data.tracks || [])
-                    .filter(
-                      (t) =>
-                        t.file &&
-                        (t.kind === "captions" || t.kind === "subtitles"),
-                    )
-                    .map((t) => ({
-                      url: t.file,
-                      lang: t.label || "English",
-                    }));
-
-                  const sourceObj = {
-                    url: m3u8Url,
-                    isM3U8: true,
-                    quality: server.name || "auto",
-                    isDub: server.type === "dub",
-                    headers: { Referer: domainName + "/" },
-                  };
-
-                  if (isBoth) {
-                    if (sourceObj.isDub) {
-                      iSource.dub.sources.push(sourceObj);
-                      if (subtitles && subtitles.length > 0) {
-                        iSource.dub.subtitles = subtitles;
-                      }
-                    } else {
-                      iSource.sub.sources.push(sourceObj);
-                      if (subtitles && subtitles.length > 0) {
-                        iSource.sub.subtitles = subtitles;
-                      }
-                    }
-                    if (subtitles && subtitles.length > 0) {
-                      if (
-                        !iSource.subtitles ||
-                        iSource.subtitles.length === 0
-                      ) {
-                        iSource.subtitles = subtitles;
-                      }
-                    }
-                  } else {
-                    if (isDub && sourceObj.isDub) {
-                      iSource.sources.push(sourceObj);
-                      if (subtitles && subtitles.length > 0) {
-                        iSource.subtitles = subtitles;
-                      }
-                    } else if (!isDub && !sourceObj.isDub) {
-                      iSource.sources.push(sourceObj);
-                      if (subtitles && subtitles.length > 0) {
-                        iSource.subtitles = subtitles;
-                      }
-                    }
-                  }
-                  directFetchSuccess = true;
-                }
-              }
+    const results = await Promise.all(servers.map((s) => processServer(s)));
+    for (const sourceObj of results) {
+      if (sourceObj) {
+        const { subtitles, ...restSource } = sourceObj;
+        if (isBoth) {
+          if (sourceObj.isDub) {
+            iSource.dub.sources.push(restSource);
+            if (
+              subtitles &&
+              subtitles.length > 0 &&
+              (!iSource.dub.subtitles || iSource.dub.subtitles.length === 0)
+            ) {
+              iSource.dub.subtitles = subtitles;
             }
-          } catch (err) {
-            console.error(
-              "Direct fetch failed, falling back to ScrapperWindow:",
-              err.message,
-            );
-            const isTimeout =
-              err.code === "ECONNABORTED" ||
-              err.message?.toLowerCase().includes("timeout");
-            const isConnectionError =
-              !err.response ||
-              err.code === "ENOTFOUND" ||
-              err.code === "ECONNREFUSED" ||
-              (err.response.status >= 500 &&
-                err.response.status <= 599 &&
-                err.response.status !== 503);
-            if (iframeUrl && (isTimeout || isConnectionError)) {
-              try {
-                const domainName = new URL(iframeUrl).origin;
-                failedDomains.add(domainName);
-              } catch (e) {}
+          } else {
+            iSource.sub.sources.push(restSource);
+            if (
+              subtitles &&
+              subtitles.length > 0 &&
+              (!iSource.sub.subtitles || iSource.sub.subtitles.length === 0)
+            ) {
+              iSource.sub.subtitles = subtitles;
             }
           }
-
-          if (!directFetchSuccess) {
-            let shouldScrap = true;
-            try {
-              const domainName = new URL(iframeUrl).origin;
-              if (failedDomains.has(domainName)) {
-                shouldScrap = false;
-              }
-            } catch (e) {}
-
-            if (shouldScrap && global.ScrapperWindow) {
-              global.LastM3u8 = null;
-              await global.ScrapperWindow.loadURL(iframeUrl).catch(() => {});
-
-              let m3u8Url = null;
-              for (let i = 0; i < 50; i++) {
-                if (global.LastM3u8 && global.LastM3u8.includes(".m3u8")) {
-                  m3u8Url = global.LastM3u8;
-                  break;
-                }
-                await new Promise((r) => setTimeout(r, 200));
-              }
-
-              if (m3u8Url) {
-                const sourceObj = {
-                  url: m3u8Url,
-                  isM3U8: true,
-                  quality: server.name || "auto",
-                  isDub: server.type === "dub",
-                  headers: { Referer: "https://megaplay.buzz/" },
-                };
-
-                if (isBoth) {
-                  if (sourceObj.isDub) iSource.dub.sources.push(sourceObj);
-                  else iSource.sub.sources.push(sourceObj);
-                } else {
-                  if (isDub && sourceObj.isDub) iSource.sources.push(sourceObj);
-                  else if (!isDub && !sourceObj.isDub)
-                    iSource.sources.push(sourceObj);
-                }
-              }
-            } else if (!shouldScrap) {
-              console.log(
-                `Skipped ScrapperWindow rendering for failed domain: ${iframeUrl}`,
-              );
-            }
+          if (
+            subtitles &&
+            subtitles.length > 0 &&
+            (!iSource.subtitles || iSource.subtitles.length === 0)
+          ) {
+            iSource.subtitles = subtitles;
+          }
+        } else {
+          iSource.sources.push(restSource);
+          if (
+            subtitles &&
+            subtitles.length > 0 &&
+            (!iSource.subtitles || iSource.subtitles.length === 0)
+          ) {
+            iSource.subtitles = subtitles;
           }
         }
-      } catch (e) {
-        console.error(e);
       }
     }
 
@@ -572,7 +447,7 @@ async function fetchEpisodeSources(episodeIdStr) {
         (!iSource.sub.subtitles || iSource.sub.subtitles.length === 0)
       ) {
         for (const subServer of subServers) {
-          const subs = await fetchSubtitlesFromServer(subServer, failedDomains);
+          const subs = await fetchSubtitlesFromServer(subServer);
           if (subs && subs.length > 0) {
             iSource.dub.subtitles = subs;
             iSource.sub.subtitles = subs;
@@ -584,7 +459,7 @@ async function fetchEpisodeSources(episodeIdStr) {
     } else {
       if (!iSource.subtitles || iSource.subtitles.length === 0) {
         for (const subServer of subServers) {
-          const subs = await fetchSubtitlesFromServer(subServer, failedDomains);
+          const subs = await fetchSubtitlesFromServer(subServer);
           if (subs && subs.length > 0) {
             iSource.subtitles = subs;
             break;
@@ -602,7 +477,7 @@ async function fetchEpisodeSources(episodeIdStr) {
 
 module.exports = {
   name: "anikoto",
-  version: "2.0.0",
+  version: "3.0.0",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,

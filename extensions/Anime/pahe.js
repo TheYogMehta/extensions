@@ -172,28 +172,35 @@ async function fetchEpisodeSources(episodeId) {
         },
       };
 
-    for (const link of links) {
-      try {
-        const res = await extract(new URL(link.url));
-        res[0].quality = link.quality;
-        res[0].isDub = link.audio === "eng";
-        if (isBoth) {
-          if (res[0]?.isDub) {
-            iSource.dub.sources.push(res[0]);
-          } else if (!res[0]?.isDub) {
-            iSource.sub.sources.push(res[0]);
+    await Promise.all(
+      links.get().map(async (link) => {
+        try {
+          const res = await extract(new URL(link.url));
+          if (res && res[0]) {
+            res[0].quality = link.quality;
+            res[0].isDub = link.audio === "eng";
+            if (isBoth) {
+              if (res[0]?.isDub) {
+                iSource.dub.sources.push(res[0]);
+              } else if (!res[0]?.isDub) {
+                iSource.sub.sources.push(res[0]);
+              }
+            } else {
+              if (isDub && res[0].isDub) {
+                iSource.sources.push(res[0]);
+              } else if (!isDub && !res[0].isDub) {
+                iSource.sources.push(res[0]);
+              }
+            }
           }
-        } else {
-          if (isDub && res[0].isDub) {
-            iSource.sources.push(res[0]);
-          } else if (!isDub && !res[0].isDub) {
-            iSource.sources.push(res[0]);
-          }
+        } catch (innerErr) {
+          console.error(
+            `Failed to extract link ${link.url}:`,
+            innerErr.message,
+          );
         }
-      } catch (innerErr) {
-        console.error(`Failed to extract link ${link.url}:`, innerErr.message);
-      }
-    }
+      }),
+    );
     return iSource;
   } catch (err) {
     console.error("Error fetching data from AnimePahe:", err);
@@ -224,8 +231,13 @@ async function extract(videoUrl, retries = 2, delay = 1000) {
       });
       return sources;
     } catch (err) {
-      if ((err.response?.status === 429 || err.message.includes("429")) && attempt < retries) {
-        console.warn(`Request to ${videoUrl.href} returned 429. Retrying in ${delay}ms (attempt ${attempt}/${retries})...`);
+      if (
+        (err.response?.status === 429 || err.message.includes("429")) &&
+        attempt < retries
+      ) {
+        console.warn(
+          `Request to ${videoUrl.href} returned 429. Retrying in ${delay}ms (attempt ${attempt}/${retries})...`,
+        );
         await new Promise((resolve) => setTimeout(resolve, delay));
         delay *= 2;
         continue;
@@ -237,7 +249,7 @@ async function extract(videoUrl, retries = 2, delay = 1000) {
 
 module.exports = {
   name: "pahe",
-  version: "2.0.0",
+  version: "3.0.0",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,
