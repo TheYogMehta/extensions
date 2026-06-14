@@ -249,59 +249,28 @@ async function fetchEpisode(dataId, page = 1) {
   }
 }
 
-async function fetchSubtitlesFromServer(server) {
-  if (!server || !server.linkId) return null;
-  try {
-    const getUrl = `${baseUrl}/ajax/server?get=${server.linkId}`;
-    const linkRes = await global.axios.get(getUrl);
-
-    const iframeUrl = linkRes.data?.result?.url;
-    if (iframeUrl) {
-      const iframeRes = await global.axios.get(iframeUrl, { timeout: 2500 });
-      const $iframe = cheerio.load(iframeRes.data);
-      const playerDbId = $iframe("#megaplay-player").attr("data-id");
-      if (playerDbId) {
-        const sourcesRes = await global.axios.get(
-          `${new URL(iframeUrl).origin}/stream/getSources?id=${playerDbId}`,
-          {
-            timeout: 2500,
-          },
-        );
-
-        if (sourcesRes.data && sourcesRes.data.tracks) {
-          const subtitles = (sourcesRes.data.tracks || [])
-            .filter(
-              (t) =>
-                t.file && (t.kind === "captions" || t.kind === "subtitles"),
-            )
-            .map((t) => ({
-              url: t.file,
-              lang: t.label || "English",
-            }));
-          if (subtitles.length > 0) {
-            return subtitles;
-          }
-        }
-      }
-    }
-  } catch (err) {
-    console.error(
-      `Failed to fetch fallback subtitles from ${server.name}:`,
-      err.message,
-    );
-  }
-  return null;
-}
-
 async function processServer(server) {
   if (!server || !server.linkId) return null;
   try {
-    const getUrl = `${baseUrl}/ajax/server?get=${server.linkId}`;
-    const linkRes = await global.axios.get(getUrl);
+    const linkRes = await global.axios.get(
+      `${baseUrl}/ajax/server?get=${server.linkId}`,
+      {
+        headers: {
+          "X-Requested-With": "XMLHttpRequest",
+        },
+      },
+    );
+
     const iframeUrl = linkRes.data?.result?.url;
     if (!iframeUrl) return null;
 
-    const iframeRes = await global.axios.get(iframeUrl, { timeout: 3000 });
+    const iframeRes = await global.axios.get(iframeUrl, {
+      headers: {
+        "X-Requested-With": "XMLHttpRequest",
+        Referer: baseUrl,
+      },
+    });
+
     const $iframe = cheerio.load(iframeRes.data);
     const playerDbId = $iframe("#megaplay-player").attr("data-id");
     if (!playerDbId) return null;
@@ -309,7 +278,9 @@ async function processServer(server) {
     const domainName = new URL(iframeUrl).origin;
     const sourcesRes = await global.axios.get(
       `${domainName}/stream/getSources?id=${playerDbId}`,
-      { timeout: 3000 },
+      {
+        headers: { "X-Requested-With": "XMLHttpRequest", Referer: baseUrl },
+      },
     );
 
     if (sourcesRes.data && sourcesRes.data.sources) {
@@ -324,12 +295,12 @@ async function processServer(server) {
             (t) => t.file && (t.kind === "captions" || t.kind === "subtitles"),
           )
           .map((t) => ({
-            url: t.file,
+            url: `http://localhost:${global.PORT}/proxy?url=${t.file}&referer=${encodeURIComponent(domainName + "/")}`,
             lang: t.label || "English",
           }));
 
         return {
-          url: m3u8Url,
+          url: `http://localhost:${global.PORT}/proxy?url=${encodeURIComponent(m3u8Url)}&referer=${encodeURIComponent(domainName + "/")}`,
           isM3U8: true,
           quality: server.name || "auto",
           isDub: server.type === "dub",
@@ -355,7 +326,11 @@ async function fetchEpisodeSources(episodeIdStr) {
     const dataIds = parts[1];
 
     const serverUrl = `${baseUrl}/ajax/server/list?servers=${dataIds}`;
-    const serverRes = await global.axios.get(serverUrl);
+    const serverRes = await global.axios.get(serverUrl, {
+      headers: {
+        "X-Requested-With": "XMLHttpRequest",
+      },
+    });
 
     const $ = cheerio.load(serverRes.data.result);
 
@@ -363,108 +338,54 @@ async function fetchEpisodeSources(episodeIdStr) {
     if (!isBoth) iSource.sources = [];
     if (isBoth) iSource = { dub: { sources: [] }, sub: { sources: [] } };
 
+    let selector = ".type[data-type='sub'] li, .type[data-type='dub'] li";
+    if (!isBoth) {
+      selector = isDub
+        ? ".type[data-type='dub'] li"
+        : ".type[data-type='sub'] li";
+    }
+
     const servers = [];
-    const subServers = [];
-    $(".type[data-type='sub'] li, .type[data-type='dub'] li").each((i, el) => {
+    $(selector).each((i, el) => {
       const type = $(el).closest(".type").attr("data-type");
-      const serverObj = {
+      servers.push({
         type: type,
         linkId: $(el).attr("data-link-id"),
         name: $(el).text().trim(),
-      };
-      if (type === "sub") {
-        subServers.push(serverObj);
-      }
-      if (!isBoth) {
-        if (isDub && type !== "dub") return;
-        if (!isDub && type !== "sub") return;
-      }
-      servers.push(serverObj);
+      });
     });
 
     const results = await Promise.all(servers.map((s) => processServer(s)));
-    for (const sourceObj of results) {
-      if (sourceObj) {
-        const { subtitles, ...restSource } = sourceObj;
-        if (isBoth) {
-          if (sourceObj.isDub) {
-            iSource.dub.sources.push(restSource);
-            if (
-              subtitles &&
-              subtitles.length > 0 &&
-              (!iSource.dub.subtitles || iSource.dub.subtitles.length === 0)
-            ) {
-              iSource.dub.subtitles = subtitles;
-            }
-          } else {
-            iSource.sub.sources.push(restSource);
-            if (
-              subtitles &&
-              subtitles.length > 0 &&
-              (!iSource.sub.subtitles || iSource.sub.subtitles.length === 0)
-            ) {
-              iSource.sub.subtitles = subtitles;
-            }
-          }
-          if (
-            subtitles &&
-            subtitles.length > 0 &&
-            (!iSource.subtitles || iSource.subtitles.length === 0)
-          ) {
-            iSource.subtitles = subtitles;
-          }
-        } else {
-          iSource.sources.push(restSource);
-          if (
-            subtitles &&
-            subtitles.length > 0 &&
-            (!iSource.subtitles || iSource.subtitles.length === 0)
-          ) {
-            iSource.subtitles = subtitles;
-          }
-        }
-      }
-    }
+    const validResults = results.filter(Boolean);
+    const anySubtitles = validResults.find(
+      (r) => r.subtitles && r.subtitles.length > 0,
+    )?.subtitles;
 
-    // Fallback logic for subtitles if they are empty
     if (isBoth) {
-      if (
-        (!iSource.dub.subtitles || iSource.dub.subtitles.length === 0) &&
-        iSource.sub.subtitles &&
-        iSource.sub.subtitles.length > 0
-      ) {
-        iSource.dub.subtitles = iSource.sub.subtitles;
+      const dubResults = validResults.filter((r) => r.isDub);
+      const subResults = validResults.filter((r) => !r.isDub);
+
+      iSource.dub.sources = dubResults.map(({ subtitles, ...rest }) => rest);
+      iSource.sub.sources = subResults.map(({ subtitles, ...rest }) => rest);
+
+      const dubSubtitles = dubResults.find(
+        (r) => r.subtitles && r.subtitles.length > 0,
+      )?.subtitles;
+      const subSubtitles = subResults.find(
+        (r) => r.subtitles && r.subtitles.length > 0,
+      )?.subtitles;
+
+      if (dubSubtitles || subSubtitles || anySubtitles) {
+        iSource.dub.subtitles = dubSubtitles || subSubtitles || anySubtitles;
+        iSource.sub.subtitles = subSubtitles || dubSubtitles || anySubtitles;
       }
-      if (
-        (!iSource.sub.subtitles || iSource.sub.subtitles.length === 0) &&
-        iSource.dub.subtitles &&
-        iSource.dub.subtitles.length > 0
-      ) {
-        iSource.sub.subtitles = iSource.dub.subtitles;
-      }
-      if (
-        (!iSource.dub.subtitles || iSource.dub.subtitles.length === 0) &&
-        (!iSource.sub.subtitles || iSource.sub.subtitles.length === 0)
-      ) {
-        for (const subServer of subServers) {
-          const subs = await fetchSubtitlesFromServer(subServer);
-          if (subs && subs.length > 0) {
-            iSource.dub.subtitles = subs;
-            iSource.sub.subtitles = subs;
-            iSource.subtitles = subs;
-            break;
-          }
-        }
+      if (anySubtitles) {
+        iSource.subtitles = anySubtitles;
       }
     } else {
-      if (!iSource.subtitles || iSource.subtitles.length === 0) {
-        for (const subServer of subServers) {
-          const subs = await fetchSubtitlesFromServer(subServer);
-          if (subs && subs.length > 0) {
-            iSource.subtitles = subs;
-            break;
-          }
-        }
+      iSource.sources = validResults.map(({ subtitles, ...rest }) => rest);
+      if (anySubtitles) {
+        iSource.subtitles = anySubtitles;
       }
     }
 
@@ -477,7 +398,7 @@ async function fetchEpisodeSources(episodeIdStr) {
 
 module.exports = {
   name: "anikoto",
-  version: "3.0.0",
+  version: "4.0.0",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,
