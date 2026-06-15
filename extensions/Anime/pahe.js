@@ -113,6 +113,7 @@ async function AnimeInfo(id) {
 async function fetchEpisode(id, page = 1) {
   try {
     let episodes = [];
+    id = id.replace(/-(dub|sub|both)$/, "");
 
     let { last_page, data, total } = (
       await global.axios.get(
@@ -249,7 +250,7 @@ async function extract(videoUrl, retries = 2, delay = 1000) {
 
 module.exports = {
   name: "pahe",
-  version: "3.0.0",
+  version: "3.0.1",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,
