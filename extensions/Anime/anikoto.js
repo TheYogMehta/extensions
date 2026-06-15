@@ -276,10 +276,14 @@ async function processServer(server) {
     if (!playerDbId) return null;
 
     const domainName = new URL(iframeUrl).origin;
+    const playerReferer = domainName + "/";
     const sourcesRes = await global.axios.get(
       `${domainName}/stream/getSources?id=${playerDbId}`,
       {
-        headers: { "X-Requested-With": "XMLHttpRequest", Referer: baseUrl },
+        headers: {
+          "X-Requested-With": "XMLHttpRequest",
+          Referer: playerReferer,
+        },
       },
     );
 
@@ -290,21 +294,29 @@ async function processServer(server) {
           ? sourcesRes.data.sources[0]?.file
           : null);
       if (m3u8Url) {
+        try {
+          const cdnDomain = new URL(m3u8Url).hostname;
+          global.setDynamicReferer(cdnDomain, playerReferer);
+          global.setFallbackReferer(playerReferer);
+        } catch (e) {}
+
         const subtitles = (sourcesRes.data.tracks || [])
           .filter(
             (t) => t.file && (t.kind === "captions" || t.kind === "subtitles"),
           )
-          .map((t) => ({
-            url: `http://localhost:${global.PORT}/proxy?url=${t.file}&referer=${encodeURIComponent(domainName + "/")}`,
-            lang: t.label || "English",
-          }));
+          .map((t) => {
+            return {
+              url: t.file,
+              lang: t.label || "English",
+            };
+          });
 
         return {
-          url: `http://localhost:${global.PORT}/proxy?url=${encodeURIComponent(m3u8Url)}&referer=${encodeURIComponent(domainName + "/")}`,
+          url: m3u8Url,
           isM3U8: true,
           quality: server.name || "auto",
           isDub: server.type === "dub",
-          headers: { Referer: domainName + "/" },
+          headers: { Referer: playerReferer },
           subtitles: subtitles,
         };
       }
