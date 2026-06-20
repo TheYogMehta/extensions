@@ -275,13 +275,18 @@ async function processServer(server) {
     const playerDbId = $iframe("#megaplay-player").attr("data-id");
     if (!playerDbId) return null;
 
+    const typeMatch =
+      iframeRes.data.match(/type\s*:\s*'([^']+)'/) ||
+      iframeUrl.match(/\/stream\/[^\/]+\/([^\/\?]+)/);
+    const type = typeMatch ? typeMatch[1] : "";
+
     const ciduMatch = iframeRes.data.match(/cidu\s*:\s*'([^']+)'/);
     const cidu = ciduMatch ? ciduMatch[1] : "";
 
     const domainName = new URL(iframeUrl).origin;
     const playerReferer = domainName + "/";
     const sourcesRes = await global.axios.get(
-      `${domainName}/stream/getSources?id=${playerDbId}${cidu ? `&cidu=${encodeURIComponent(cidu)}` : ""}`,
+      `${domainName}/stream/getSources?id=${playerDbId}${type ? `&type=${encodeURIComponent(type)}` : ""}${cidu ? `&cidu=${encodeURIComponent(cidu)}` : ""}`,
       {
         headers: {
           "X-Requested-With": "XMLHttpRequest",
@@ -413,7 +418,7 @@ async function fetchEpisodeSources(episodeIdStr) {
 
 module.exports = {
   name: "anikoto",
-  version: "4.0.1",
+  version: "4.0.2",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,
