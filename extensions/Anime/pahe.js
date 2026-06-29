@@ -105,7 +105,7 @@ async function AnimeInfo(id) {
     return animeInfo;
   } catch (error) {
     console.error("Error fetching data from AnimePahe:", error);
-    return { results: [] };
+    throw error;
   }
 }
 
@@ -250,7 +250,7 @@ async function extract(videoUrl, retries = 2, delay = 1000) {
 
 module.exports = {
   name: "pahe",
-  version: "3.0.1",
+  version: "3.0.2",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,

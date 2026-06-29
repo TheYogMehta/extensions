@@ -193,7 +193,7 @@ async function AnimeInfo(id) {
     return animeInfo;
   } catch (error) {
     console.error("Error fetching data from AnikotoTV:", error);
-    return { results: [] };
+    throw error;
   }
 }
 
@@ -418,7 +418,7 @@ async function fetchEpisodeSources(episodeIdStr) {
 
 module.exports = {
   name: "anikoto",
-  version: "4.0.2",
+  version: "4.0.3",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,
