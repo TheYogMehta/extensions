@@ -5,7 +5,7 @@ const cheerio = require("cheerio");
 const baseUrl = "https://animepahe.pw";
 
 // Anime Search
-async function SearchAnime(query, {}) {
+async function SearchAnime(query, filters = {}) {
   try {
     const { data } = await global.axios.get(
       `${baseUrl}/api?m=search&q=${encodeURIComponent(query)}`,
@@ -250,7 +250,7 @@ async function extract(videoUrl, retries = 2, delay = 1000) {
 
 module.exports = {
   name: "pahe",
-  version: "3.0.2",
+  version: "3.0.3",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,

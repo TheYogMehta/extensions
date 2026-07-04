@@ -310,12 +310,24 @@ async function processServer(server) {
 
         const subtitles = (sourcesRes.data.tracks || [])
           .filter(
-            (t) => t.file && (t.kind === "captions" || t.kind === "subtitles"),
+            (t) =>
+              t.file &&
+              (!t.kind ||
+                t.kind.toLowerCase() === "captions" ||
+                t.kind.toLowerCase() === "subtitles"),
           )
           .map((t) => {
+            let sUrl = t.file;
+            if (sUrl.startsWith("//")) {
+              sUrl = "https:" + sUrl;
+            } else if (sUrl.startsWith("/")) {
+              try {
+                sUrl = new URL(sUrl, domainName).href;
+              } catch (e) {}
+            }
             return {
-              url: t.file,
-              lang: t.label || "English",
+              url: sUrl,
+              lang: t.label || t.language || "English",
             };
           });
 
@@ -418,7 +430,7 @@ async function fetchEpisodeSources(episodeIdStr) {
 
 module.exports = {
   name: "anikoto",
-  version: "4.0.3",
+  version: "4.0.4",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,
