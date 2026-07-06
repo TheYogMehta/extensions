@@ -9,6 +9,11 @@ async function SearchAnime(query, filters = {}) {
   try {
     const { data } = await global.axios.get(
       `${baseUrl}/api?m=search&q=${encodeURIComponent(query)}`,
+      {
+        headers: {
+          Referer: baseUrl,
+        },
+      },
     );
     const res = {
       currentPage: 1,
@@ -31,6 +36,11 @@ async function fetchRecentEpisodes(filters = {}) {
   try {
     const { data } = await global.axios.get(
       `${baseUrl}/api?m=airing&page=${filters.page}`,
+      {
+        headers: {
+          Referer: baseUrl,
+        },
+      },
     );
     const res = {
       currentPage: filters.page,
@@ -60,7 +70,11 @@ async function AnimeInfo(id) {
   };
 
   try {
-    const { data } = await global.axios.get(`${baseUrl}/anime/${id}`);
+    const { data } = await global.axios.get(`${baseUrl}/anime/${id}`, {
+      headers: {
+        Referer: baseUrl,
+      },
+    });
     const $ = (0, cheerio.load)(data);
 
     let MalId =
@@ -118,6 +132,11 @@ async function fetchEpisode(id, page = 1) {
     let { last_page, data, total } = (
       await global.axios.get(
         `${baseUrl}/api?m=release&id=${id}&sort=episode_desc&page=${page}`,
+        {
+          headers: {
+            Referer: baseUrl,
+          },
+        },
       )
     ).data;
 
@@ -151,7 +170,11 @@ async function fetchEpisodeSources(episodeId) {
 
     episodeId = episodeId.replace(/-(dub|sub|both)$/, "");
 
-    const { data } = await global.axios.get(`${baseUrl}/play/${episodeId}`);
+    const { data } = await global.axios.get(`${baseUrl}/play/${episodeId}`, {
+      headers: {
+        Referer: baseUrl,
+      },
+    });
     const $ = (0, cheerio.load)(data);
 
     const links = $("div#resolutionMenu > button").map((i, el) => ({
@@ -250,7 +273,7 @@ async function extract(videoUrl, retries = 2, delay = 1000) {
 
 module.exports = {
   name: "pahe",
-  version: "3.0.3",
+  version: "3.0.4",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,
