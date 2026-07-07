@@ -370,8 +370,18 @@ async function processEmbedServer(server) {
       const subParam = urlObj.searchParams.get("sub");
       const captionParam = urlObj.searchParams.get("caption_1");
       const c1FileParam = urlObj.searchParams.get("c1_file");
-      const subUrl = subParam || captionParam || c1FileParam;
+      let subUrl = subParam || captionParam || c1FileParam;
       if (subUrl) {
+        if (subUrl.startsWith("//")) {
+          subUrl = "https:" + subUrl;
+        } else if (
+          !subUrl.startsWith("http://") &&
+          !subUrl.startsWith("https://")
+        ) {
+          try {
+            subUrl = new URL(subUrl, embedUrl).href;
+          } catch (e) {}
+        }
         subtitles.push({
           url: subUrl,
           lang: "English",
@@ -386,31 +396,66 @@ async function processEmbedServer(server) {
     });
 
     try {
-      const tracksRegex = /tracks\s*:\s*(\[[^\]]+\])/i;
+      const tracksRegex = /tracks\s*[:=]\s*(\[[^\]]+\])/i;
       const tracksMatch = embedHtml.match(tracksRegex);
       if (tracksMatch) {
-        try {
-          const parsed = JSON.parse(tracksMatch[1]);
-          for (const t of parsed) {
-            if (t.file && (t.kind === "captions" || t.kind === "subtitles" || !t.kind)) {
-              let sUrl = t.file;
-              if (sUrl.startsWith("//")) sUrl = "https:" + sUrl;
-              else if (sUrl.startsWith("/")) sUrl = new URL(sUrl, embedUrl).href;
+        const arrayStr = tracksMatch[1];
+        const objRegex = /\{([^}]+)\}/g;
+        let objMatch;
+        while ((objMatch = objRegex.exec(arrayStr)) !== null) {
+          const objContent = objMatch[1];
+          const fileM = objContent.match(
+            /['"]?file['"]?\s*:\s*['"]([^'"]+)['"]/,
+          );
+          if (fileM) {
+            let sUrl = fileM[1];
+            const labelM = objContent.match(
+              /['"]?label['"]?\s*:\s*['"]([^'"]+)['"]/,
+            );
+            const kindM = objContent.match(
+              /['"]?kind['"]?\s*:\s*['"]([^'"]+)['"]/,
+            );
+            const langM = objContent.match(
+              /['"]?(?:language|lang)['"]?\s*:\s*['"]([^'"]+)['"]/,
+            );
+
+            const kind = kindM ? kindM[1].toLowerCase() : "";
+            if (!kind || kind !== "thumbnails") {
+              if (sUrl.startsWith("//")) {
+                sUrl = "https:" + sUrl;
+              } else if (
+                !sUrl.startsWith("http://") &&
+                !sUrl.startsWith("https://")
+              ) {
+                try {
+                  sUrl = new URL(sUrl, embedUrl).href;
+                } catch (e) {}
+              }
               subtitles.push({
                 url: sUrl,
-                lang: t.label || t.language || "English",
+                lang: labelM ? labelM[1] : langM ? langM[1] : "English",
               });
             }
           }
-        } catch (e) {}
+        }
       }
+
       if (subtitles.length === 0) {
-        const subFileRegex = /["']?file["']?\s*:\s*["']([^"']+\.(?:vtt|srt)[^"']*)["']/gi;
+        const subFileRegex =
+          /["']?file["']?\s*:\s*["']([^"']+\.(?:vtt|srt)[^"']*)["']/gi;
         let subMatch;
         while ((subMatch = subFileRegex.exec(embedHtml)) !== null) {
           let sUrl = subMatch[1];
-          if (sUrl.startsWith("//")) sUrl = "https:" + sUrl;
-          else if (sUrl.startsWith("/")) sUrl = new URL(sUrl, embedUrl).href;
+          if (sUrl.startsWith("//")) {
+            sUrl = "https:" + sUrl;
+          } else if (
+            !sUrl.startsWith("http://") &&
+            !sUrl.startsWith("https://")
+          ) {
+            try {
+              sUrl = new URL(sUrl, embedUrl).href;
+            } catch (e) {}
+          }
           subtitles.push({ url: sUrl, lang: "English" });
         }
       }
@@ -500,7 +545,7 @@ async function processEmbedServer(server) {
 
 module.exports = {
   name: "anineko",
-  version: "1.0.0",
+  version: "1.0.2",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,

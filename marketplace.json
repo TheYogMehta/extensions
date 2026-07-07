@@ -2,7 +2,7 @@
   "Anime": [
     {
       "name": "anikoto",
-      "version": "4.0.4",
+      "version": "4.0.5",
       "MinAppVersion": "7.2.2",
       "disabled": false
     },
@@ -14,7 +14,7 @@
     },
     {
       "name": "anineko",
-      "version": "1.0.0",
+      "version": "1.0.2",
       "MinAppVersion": "7.3.0",
       "disabled": false
     }
