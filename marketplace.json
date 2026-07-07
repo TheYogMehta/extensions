@@ -14,8 +14,8 @@
     },
     {
       "name": "anineko",
-      "version": "1.0.2",
-      "MinAppVersion": "7.3.0",
+      "version": "2.0.0",
+      "MinAppVersion": "7.4.4",
       "disabled": false
     }
   ],

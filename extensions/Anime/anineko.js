@@ -503,6 +503,14 @@ async function processEmbedServer(server) {
         const embedDomain = new URL(embedUrl).origin + "/";
         global.setDynamicReferer(cdnDomain, embedDomain);
         global.setFallbackReferer(embedDomain);
+        for (const sub of subtitles) {
+          try {
+            const subDomain = new URL(sub.url).hostname;
+            if (subDomain !== cdnDomain) {
+              global.setDynamicReferer(subDomain, embedDomain);
+            }
+          } catch (_) {}
+        }
       } catch (e) {}
 
       return {
@@ -524,6 +532,14 @@ async function processEmbedServer(server) {
         const embedDomain = new URL(embedUrl).origin + "/";
         global.setDynamicReferer(cdnDomain, embedDomain);
         global.setFallbackReferer(embedDomain);
+        for (const sub of subtitles) {
+          try {
+            const subDomain = new URL(sub.url).hostname;
+            if (subDomain !== cdnDomain) {
+              global.setDynamicReferer(subDomain, embedDomain);
+            }
+          } catch (_) {}
+        }
       } catch (e) {}
 
       return {
@@ -545,7 +561,7 @@ async function processEmbedServer(server) {
 
 module.exports = {
   name: "anineko",
-  version: "1.0.2",
+  version: "2.0.0",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,
