@@ -173,34 +173,32 @@ async function fetchChapterPages(chapterId) {
       );
     }
 
-    const variables = JSON.stringify({
+    const variables = {
       mangaId: mangaId,
       translationType: "sub",
       chapterString: chapterString,
-      limit: 30,
-      offset: 0,
-    });
+    };
 
-    const extensions = JSON.stringify({
-      persistedQuery: {
-        version: 1,
-        sha256Hash:
-          "466783e19a7540387e34265be906bebbe853857088d45d28af922ab8668ebb31",
-      },
-    });
+    const query = `query ($mangaId: String!, $translationType: VaildTranslationTypeMangaEnumType!, $chapterString: String!) {
+      tobeparsed: chaptersForRead(mangaId: $mangaId, translationType: $translationType, chapterString: $chapterString) {
+        edges {
+          pictureUrls
+          pictureUrlHead
+        }
+      }
+    }`;
 
-    const response = await global.axios.get(apiUrl, {
-      params: {
-        variables,
-        extensions,
-      },
+    const response = await global.axios.post(apiUrl, {
+      query,
+      variables,
     });
 
     let edges = [];
 
     const payload = response.data?.data?.tobeparsed;
     if (payload) {
-      const decrypted = decryptTobeparsed(payload);
+      const decrypted =
+        typeof payload === "string" ? decryptTobeparsed(payload) : payload;
       if (decrypted) {
         if (
           decrypted.chapterPages &&
@@ -214,6 +212,8 @@ async function fetchChapterPages(chapterId) {
           decrypted.chaptersForRead.edges.length > 0
         ) {
           edges = decrypted.chaptersForRead.edges;
+        } else if (decrypted.edges && decrypted.edges.length > 0) {
+          edges = decrypted.edges;
         }
       }
     }
@@ -313,7 +313,7 @@ function decryptJSON(obj) {
 
 module.exports = {
   name: "allmanga",
-  version: "2.0.0",
+  version: "3.0.0",
   latestManga,
   searchManga,
   fetchMangaInfo,

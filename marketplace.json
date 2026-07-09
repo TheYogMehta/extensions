@@ -28,7 +28,7 @@
     },
     {
       "name": "allmanga",
-      "version": "2.0.0",
+      "version": "3.0.0",
       "MinAppVersion": "7.0.0",
       "disabled": false
     }
