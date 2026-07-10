@@ -282,7 +282,7 @@ async function fetchEpisodeSources(episodeId) {
     let cleanId = episodeId;
     const isBoth = episodeId.endsWith("-both");
 
-    const suffixMatch = episodeId.match(/-([a-z0-9]+)$/);
+    const suffixMatch = episodeId.match(/-(sub|dub|hsub|both)$/);
     if (suffixMatch) {
       const suffix = suffixMatch[1];
       reqLang = suffix;
@@ -585,7 +585,7 @@ async function processEmbedServer(server) {
 
 module.exports = {
   name: "anineko",
-  version: "2.0.0",
+  version: "2.0.1",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,
