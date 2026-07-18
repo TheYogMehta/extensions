@@ -410,7 +410,14 @@ async function fetchEpisodeSources(episodeIdStr) {
       });
     });
 
-    const results = await Promise.all(servers.map((s) => processServer(s)));
+    const results = await Promise.all(
+      servers.map((s) =>
+        Promise.race([
+          processServer(s),
+          new Promise((resolve) => setTimeout(() => resolve(null), 4000)),
+        ]),
+      ),
+    );
     const validResults = results.filter(Boolean);
     const anySubtitles = validResults.find(
       (r) => r.subtitles && r.subtitles.length > 0,
@@ -453,7 +460,7 @@ async function fetchEpisodeSources(episodeIdStr) {
 
 module.exports = {
   name: "anikoto",
-  version: "4.0.5",
+  version: "4.0.6",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,
