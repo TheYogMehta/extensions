@@ -147,6 +147,33 @@ async function AnimeInfo(id) {
   }
 }
 
+const firstEpCache = {};
+
+async function getFirstEpisodeNumber(id, lastPage) {
+  if (firstEpCache[id] !== undefined) {
+    return firstEpCache[id];
+  }
+  try {
+    const { data } = await global.axios.get(
+      `${baseUrl}/api?m=release&id=${id}&sort=episode_desc&page=${lastPage}`,
+      {
+        headers: {
+          Referer: baseUrl,
+        },
+      }
+    );
+    if (data?.data && data.data.length > 0) {
+      const firstEp = data.data[data.data.length - 1].episode;
+      firstEpCache[id] = firstEp;
+      return firstEp;
+    }
+  } catch (err) {
+    console.error("Failed to fetch first episode number:", err);
+  }
+  firstEpCache[id] = 1;
+  return 1;
+}
+
 // Fetching Episodes Pages
 async function fetchEpisode(id, page = 1) {
   try {
@@ -164,11 +191,17 @@ async function fetchEpisode(id, page = 1) {
       )
     ).data;
 
+    const firstEpNum = await getFirstEpisodeNumber(id, last_page);
+    const offset = firstEpNum - 1;
+
     data.forEach((item) => {
       let hasEngAudio = item?.audio && item?.audio?.toLowerCase() === "eng";
+      let mappedNumber = item.episode - offset;
+      if (mappedNumber < 1) mappedNumber = item.episode;
+
       episodes.push({
         id: `${id}/${item.session}`,
-        number: item.episode,
+        number: mappedNumber,
         title: item.title,
         duration: item.duration,
         lang: hasEngAudio ? "both" : "sub",
@@ -299,7 +332,7 @@ async function extract(videoUrl, retries = 2, delay = 1000) {
 
 module.exports = {
   name: "pahe",
-  version: "3.0.5",
+  version: "3.1.0",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,
