@@ -330,17 +330,22 @@ async function fetchEpisodeSources(episodeId) {
     }
 
     const results = await Promise.all(
-      serversToProcess.map(async (server) => {
-        try {
-          return await processEmbedServer(server);
-        } catch (err) {
-          console.error(
-            `Failed to process server ${server.name}:`,
-            err.message,
-          );
-          return null;
-        }
-      }),
+      serversToProcess.map((server) =>
+        Promise.race([
+          (async () => {
+            try {
+              return await processEmbedServer(server);
+            } catch (err) {
+              console.error(
+                `Failed to process server ${server.name}:`,
+                err.message,
+              );
+              return null;
+            }
+          })(),
+          new Promise((resolve) => setTimeout(() => resolve(null), 4000)),
+        ]),
+      ),
     );
 
     const validResults = results.filter(Boolean);
@@ -585,7 +590,7 @@ async function processEmbedServer(server) {
 
 module.exports = {
   name: "anineko",
-  version: "2.0.1",
+  version: "2.0.2",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,

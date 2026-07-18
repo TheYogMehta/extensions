@@ -8,13 +8,13 @@
     },
     {
       "name": "pahe",
-      "version": "3.0.4",
+      "version": "3.0.5",
       "MinAppVersion": "7.2.2",
       "disabled": false
     },
     {
       "name": "anineko",
-      "version": "2.0.1",
+      "version": "2.0.2",
       "MinAppVersion": "7.4.4",
       "disabled": false
     }

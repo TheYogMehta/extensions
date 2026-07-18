@@ -221,33 +221,35 @@ async function fetchEpisodeSources(episodeId) {
       };
 
     await Promise.all(
-      links.get().map(async (link) => {
-        try {
-          const res = await extract(new URL(link.url));
-          if (res && res[0]) {
-            res[0].quality = link.quality;
-            res[0].isDub = link.audio === "eng";
-            if (isBoth) {
-              if (res[0]?.isDub) {
-                iSource.dub.sources.push(res[0]);
-              } else if (!res[0]?.isDub) {
-                iSource.sub.sources.push(res[0]);
+      links.get().map((link) =>
+        Promise.race([
+          (async () => {
+            try {
+              const res = await extract(new URL(link.url));
+              if (res && res[0]) {
+                res[0].quality = link.quality;
+                res[0].isDub = link.audio === "eng";
+                if (isBoth) {
+                  if (res[0]?.isDub) {
+                    iSource.dub.sources.push(res[0]);
+                  } else if (!res[0]?.isDub) {
+                    iSource.sub.sources.push(res[0]);
+                  }
+                } else {
+                  if (isDub && res[0].isDub) {
+                    iSource.sources.push(res[0]);
+                  } else if (!isDub && !res[0].isDub) {
+                    iSource.sources.push(res[0]);
+                  }
+                }
               }
-            } else {
-              if (isDub && res[0].isDub) {
-                iSource.sources.push(res[0]);
-              } else if (!isDub && !res[0].isDub) {
-                iSource.sources.push(res[0]);
-              }
+            } catch (err) {
+              console.error("Failed to extract link:", err.message);
             }
-          }
-        } catch (innerErr) {
-          console.error(
-            `Failed to extract link ${link.url}:`,
-            innerErr.message,
-          );
-        }
-      }),
+          })(),
+          new Promise((resolve) => setTimeout(resolve, 4000)),
+        ]),
+      ),
     );
     return iSource;
   } catch (err) {
@@ -297,7 +299,7 @@ async function extract(videoUrl, retries = 2, delay = 1000) {
 
 module.exports = {
   name: "pahe",
-  version: "3.0.4",
+  version: "3.0.5",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,
