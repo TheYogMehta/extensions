@@ -243,21 +243,16 @@ async function fetchEpisode(dataId, page = 1) {
         `Episode ${epNum}`;
 
       if (epId && dataIds) {
-        const hasSub = $(el).attr("data-sub") === "1";
-        const hasDub = $(el).attr("data-dub") === "1";
-        let lang = "sub";
-        if (hasSub && hasDub) {
-          lang = "both";
-        } else if (hasDub) {
-          lang = "dub";
-        }
+        const langs = [];
+        if ($(el).attr("data-sub") === "1") langs.push("sub");
+        if ($(el).attr("data-dub") === "1") langs.push("dub");
 
         episodes.push({
           id: `${epId}|${dataIds}`,
           number: parseFloat(epNum),
           title: title,
           duration: "Unknown",
-          lang: lang,
+          langs,
         });
       }
     });
@@ -460,7 +455,7 @@ async function fetchEpisodeSources(episodeIdStr) {
 
 module.exports = {
   name: "anikoto",
-  version: "4.0.6",
+  version: "4.0.7",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,

@@ -235,21 +235,12 @@ async function fetchEpisode(id, page = 1) {
         .map((j, badge) => $(badge).text().trim().toUpperCase())
         .get();
 
-      const hasSub = badges.includes("SUB");
-      const hasDub = badges.includes("DUB");
-      const hasHsub = badges.includes("HSUB") || badges.includes("HARDSUB");
-
-      let lang = "sub";
-      if (hasSub && hasDub) {
-        lang = "both";
-      } else if (hasDub) {
-        lang = "dub";
-      }
-
       const langs = [];
-      if (hasSub) langs.push("sub");
-      if (hasHsub) langs.push("hsub");
-      if (hasDub) langs.push("dub");
+      if (badges.includes("SUB")) langs.push("sub");
+      if (badges.includes("HSUB") || badges.includes("HARDSUB"))
+        langs.push("hsub");
+      if (badges.includes("DUB")) langs.push("dub");
+
       const watchPathMatch = href.match(/\/watch\/(.+)$/);
       const epSlug = watchPathMatch ? watchPathMatch[1] : `${id}/ep-${epNum}`;
 
@@ -258,9 +249,7 @@ async function fetchEpisode(id, page = 1) {
         number: epNum,
         title,
         duration: "Unknown",
-        lang,
         langs,
-        hasHsub,
       });
     });
 
@@ -590,7 +579,7 @@ async function processEmbedServer(server) {
 
 module.exports = {
   name: "anineko",
-  version: "2.0.2",
+  version: "2.0.3",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,

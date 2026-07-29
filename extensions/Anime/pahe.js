@@ -160,7 +160,7 @@ async function getFirstEpisodeNumber(id, lastPage) {
         headers: {
           Referer: baseUrl,
         },
-      }
+      },
     );
     if (data?.data && data.data.length > 0) {
       const firstEp = data.data[data.data.length - 1].episode;
@@ -199,12 +199,15 @@ async function fetchEpisode(id, page = 1) {
       let mappedNumber = item.episode - offset;
       if (mappedNumber < 1) mappedNumber = item.episode;
 
+      const langs = ["sub"];
+      if (hasEngAudio) langs.push("dub");
+
       episodes.push({
         id: `${id}/${item.session}`,
         number: mappedNumber,
         title: item.title,
         duration: item.duration,
-        lang: hasEngAudio ? "both" : "sub",
+        langs,
       });
     });
 
@@ -332,7 +335,7 @@ async function extract(videoUrl, retries = 2, delay = 1000) {
 
 module.exports = {
   name: "pahe",
-  version: "3.1.0",
+  version: "3.1.1",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,
