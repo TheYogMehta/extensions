@@ -85,11 +85,8 @@ async function fetchRecentEpisodes(filters = {}) {
 
 // Animeinfo
 async function AnimeInfo(id) {
-  let suffix = id.endsWith("dub") ? "dub" : id.endsWith("sub") ? "sub" : "both";
-  id = id.replace(/-(dub|sub|both)$/, "");
-
   const animeInfo = {
-    id: `${id}-${suffix}`,
+    id: id,
     title: "",
   };
 
@@ -138,7 +135,6 @@ async function AnimeInfo(id) {
       .trim();
 
     animeInfo.dataId = id;
-    animeInfo.subOrDub = suffix;
 
     return animeInfo;
   } catch (error) {
@@ -178,7 +174,6 @@ async function getFirstEpisodeNumber(id, lastPage) {
 async function fetchEpisode(id, page = 1) {
   try {
     let episodes = [];
-    id = id.replace(/-(dub|sub|both)$/, "");
 
     let { last_page, data, total } = (
       await global.axios.get(
@@ -225,11 +220,6 @@ async function fetchEpisode(id, page = 1) {
 // fetching Episodes Download Links
 async function fetchEpisodeSources(episodeId) {
   try {
-    const isBoth = episodeId.endsWith("both");
-    const isDub = episodeId.endsWith("dub") ? true : false;
-
-    episodeId = episodeId.replace(/-(dub|sub|both)$/, "");
-
     const { data } = await global.axios.get(`${baseUrl}/play/${episodeId}`, {
       headers: {
         Referer: baseUrl,
@@ -243,18 +233,14 @@ async function fetchEpisodeSources(episodeId) {
       audio: $(el).attr("data-audio"),
     }));
 
-    let iSource = {};
-
-    if (!isBoth) iSource.sources = [];
-    if (isBoth)
-      iSource = {
-        dub: {
-          sources: [],
-        },
-        sub: {
-          sources: [],
-        },
-      };
+    let iSource = {
+      dub: {
+        sources: [],
+      },
+      sub: {
+        sources: [],
+      },
+    };
 
     await Promise.all(
       links.get().map((link) =>
@@ -265,18 +251,10 @@ async function fetchEpisodeSources(episodeId) {
               if (res && res[0]) {
                 res[0].quality = link.quality;
                 res[0].isDub = link.audio === "eng";
-                if (isBoth) {
-                  if (res[0]?.isDub) {
-                    iSource.dub.sources.push(res[0]);
-                  } else if (!res[0]?.isDub) {
-                    iSource.sub.sources.push(res[0]);
-                  }
+                if (res[0]?.isDub) {
+                  iSource.dub.sources.push(res[0]);
                 } else {
-                  if (isDub && res[0].isDub) {
-                    iSource.sources.push(res[0]);
-                  } else if (!isDub && !res[0].isDub) {
-                    iSource.sources.push(res[0]);
-                  }
+                  iSource.sub.sources.push(res[0]);
                 }
               }
             } catch (err) {
@@ -335,7 +313,7 @@ async function extract(videoUrl, retries = 2, delay = 1000) {
 
 module.exports = {
   name: "pahe",
-  version: "3.1.1",
+  version: "3.1.2",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,

@@ -148,11 +148,8 @@ async function fetchRecentEpisodes(filters = {}) {
 
 // Anime Info
 async function AnimeInfo(id) {
-  let suffix = id.endsWith("dub") ? "dub" : id.endsWith("sub") ? "sub" : "both";
-  id = id.replace(/-(dub|sub|both)$/, "");
-
   const animeInfo = {
-    id: `${id}-${suffix}`,
+    id: id,
     title: "",
   };
 
@@ -202,7 +199,6 @@ async function AnimeInfo(id) {
     animeInfo.type = typeEl || "TV";
 
     animeInfo.dataId = id;
-    animeInfo.subOrDub = suffix;
 
     return animeInfo;
   } catch (error) {
@@ -214,8 +210,6 @@ async function AnimeInfo(id) {
 // Fetch Episodes
 async function fetchEpisode(id, page = 1) {
   try {
-    id = id.replace(/-(dub|sub|both)$/, "");
-
     const { data: html } = await global.axios.get(`${baseUrl}/watch/${id}`);
     const $ = cheerio.load(html);
     let episodes = [];
@@ -267,25 +261,12 @@ async function fetchEpisode(id, page = 1) {
 // Fetch Episode Sources
 async function fetchEpisodeSources(episodeId) {
   try {
-    let reqLang = "sub";
-    let cleanId = episodeId;
-    const isBoth = episodeId.endsWith("-both");
-
-    const suffixMatch = episodeId.match(/-(sub|dub|hsub|both)$/);
-    if (suffixMatch) {
-      const suffix = suffixMatch[1];
-      reqLang = suffix;
-      cleanId = episodeId.substring(0, episodeId.lastIndexOf("-" + suffix));
-    }
-
     const { data: html } = await global.axios.get(
-      `${baseUrl}/watch/${cleanId}`,
+      `${baseUrl}/watch/${episodeId}`,
     );
     const $ = cheerio.load(html);
 
-    let iSource = {};
-    if (!isBoth) iSource.sources = [];
-    if (isBoth) iSource = { dub: { sources: [] }, sub: { sources: [] } };
+    let iSource = { dub: { sources: [] }, sub: { sources: [] } };
 
     const servers = [];
 
@@ -311,15 +292,8 @@ async function fetchEpisodeSources(episodeId) {
         });
     });
 
-    let serversToProcess;
-    if (reqLang === "both") {
-      serversToProcess = servers;
-    } else {
-      serversToProcess = servers.filter((s) => s.type === reqLang);
-    }
-
     const results = await Promise.all(
-      serversToProcess.map((server) =>
+      servers.map((server) =>
         Promise.race([
           (async () => {
             try {
@@ -339,31 +313,20 @@ async function fetchEpisodeSources(episodeId) {
 
     const validResults = results.filter(Boolean);
 
-    if (isBoth) {
-      const dubResults = validResults.filter((r) => r.isDub);
-      const subResults = validResults.filter((r) => !r.isDub);
+    const dubResults = validResults.filter((r) => r.isDub);
+    const subResults = validResults.filter((r) => !r.isDub);
 
-      iSource.dub.sources = dubResults.map(({ subtitles, ...rest }) => rest);
-      iSource.sub.sources = subResults.map(({ subtitles, ...rest }) => rest);
+    iSource.dub.sources = dubResults.map(({ subtitles, ...rest }) => rest);
+    iSource.sub.sources = subResults.map(({ subtitles, ...rest }) => rest);
 
-      const anySubtitles = validResults.find(
-        (r) => r.subtitles && r.subtitles.length > 0,
-      )?.subtitles;
+    const anySubtitles = validResults.find(
+      (r) => r.subtitles && r.subtitles.length > 0,
+    )?.subtitles;
 
-      if (anySubtitles) {
-        iSource.dub.subtitles = anySubtitles;
-        iSource.sub.subtitles = anySubtitles;
-        iSource.subtitles = anySubtitles;
-      }
-    } else {
-      iSource.sources = validResults.map(({ subtitles, ...rest }) => rest);
-
-      const anySubtitles = validResults.find(
-        (r) => r.subtitles && r.subtitles.length > 0,
-      )?.subtitles;
-      if (anySubtitles) {
-        iSource.subtitles = anySubtitles;
-      }
+    if (anySubtitles) {
+      iSource.dub.subtitles = anySubtitles;
+      iSource.sub.subtitles = anySubtitles;
+      iSource.subtitles = anySubtitles;
     }
 
     return iSource;
@@ -579,7 +542,7 @@ async function processEmbedServer(server) {
 
 module.exports = {
   name: "anineko",
-  version: "2.0.3",
+  version: "2.0.4",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,

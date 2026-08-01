@@ -170,11 +170,8 @@ async function fetchRecentEpisodes(filters = {}) {
 }
 
 async function AnimeInfo(id) {
-  let suffix = id.endsWith("dub") ? "dub" : id.endsWith("sub") ? "sub" : "both";
-  id = id.replace(/-(dub|sub|both)$/, "");
-
   const animeInfo = {
-    id: `${id}-${suffix}`,
+    id: id,
     title: "",
   };
 
@@ -212,7 +209,6 @@ async function AnimeInfo(id) {
       }
     });
     animeInfo.dataId = dataId;
-    animeInfo.subOrDub = suffix;
 
     return animeInfo;
   } catch (error) {
@@ -367,11 +363,7 @@ async function processServer(server) {
 
 async function fetchEpisodeSources(episodeIdStr) {
   try {
-    const isBoth = episodeIdStr.endsWith("both");
-    const isDub = episodeIdStr.endsWith("dub") ? true : false;
-
-    let cleanStr = episodeIdStr.replace(/-(dub|sub|both)$/, "");
-    const parts = cleanStr.split("|");
+    const parts = episodeIdStr.split("|");
     const epId = parts[0];
     const dataIds = parts[1];
 
@@ -384,16 +376,9 @@ async function fetchEpisodeSources(episodeIdStr) {
 
     const $ = cheerio.load(serverRes.data.result);
 
-    let iSource = {};
-    if (!isBoth) iSource.sources = [];
-    if (isBoth) iSource = { dub: { sources: [] }, sub: { sources: [] } };
+    let iSource = { dub: { sources: [] }, sub: { sources: [] } };
 
     let selector = ".type[data-type='sub'] li, .type[data-type='dub'] li";
-    if (!isBoth) {
-      selector = isDub
-        ? ".type[data-type='dub'] li"
-        : ".type[data-type='sub'] li";
-    }
 
     const servers = [];
     $(selector).each((i, el) => {
@@ -418,32 +403,25 @@ async function fetchEpisodeSources(episodeIdStr) {
       (r) => r.subtitles && r.subtitles.length > 0,
     )?.subtitles;
 
-    if (isBoth) {
-      const dubResults = validResults.filter((r) => r.isDub);
-      const subResults = validResults.filter((r) => !r.isDub);
+    const dubResults = validResults.filter((r) => r.isDub);
+    const subResults = validResults.filter((r) => !r.isDub);
 
-      iSource.dub.sources = dubResults.map(({ subtitles, ...rest }) => rest);
-      iSource.sub.sources = subResults.map(({ subtitles, ...rest }) => rest);
+    iSource.dub.sources = dubResults.map(({ subtitles, ...rest }) => rest);
+    iSource.sub.sources = subResults.map(({ subtitles, ...rest }) => rest);
 
-      const dubSubtitles = dubResults.find(
-        (r) => r.subtitles && r.subtitles.length > 0,
-      )?.subtitles;
-      const subSubtitles = subResults.find(
-        (r) => r.subtitles && r.subtitles.length > 0,
-      )?.subtitles;
+    const dubSubtitles = dubResults.find(
+      (r) => r.subtitles && r.subtitles.length > 0,
+    )?.subtitles;
+    const subSubtitles = subResults.find(
+      (r) => r.subtitles && r.subtitles.length > 0,
+    )?.subtitles;
 
-      if (dubSubtitles || subSubtitles || anySubtitles) {
-        iSource.dub.subtitles = dubSubtitles || subSubtitles || anySubtitles;
-        iSource.sub.subtitles = subSubtitles || dubSubtitles || anySubtitles;
-      }
-      if (anySubtitles) {
-        iSource.subtitles = anySubtitles;
-      }
-    } else {
-      iSource.sources = validResults.map(({ subtitles, ...rest }) => rest);
-      if (anySubtitles) {
-        iSource.subtitles = anySubtitles;
-      }
+    if (dubSubtitles || subSubtitles || anySubtitles) {
+      iSource.dub.subtitles = dubSubtitles || subSubtitles || anySubtitles;
+      iSource.sub.subtitles = subSubtitles || dubSubtitles || anySubtitles;
+    }
+    if (anySubtitles) {
+      iSource.subtitles = anySubtitles;
     }
 
     return iSource;
@@ -455,7 +433,7 @@ async function fetchEpisodeSources(episodeIdStr) {
 
 module.exports = {
   name: "anikoto",
-  version: "4.0.7",
+  version: "4.0.8",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,
