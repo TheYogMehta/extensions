@@ -51,7 +51,7 @@ async function latestManga(page = 1) {
             latestMangas.push({
               id: id,
               title: title,
-              image: `/api/image?url=${image}`,
+              image: image,
             });
           }
         }
@@ -102,7 +102,7 @@ async function searchManga(query, page = 1) {
                 results.push({
                   id: id,
                   title: title,
-                  image: `/api/image?url=${image}`,
+                  image: image,
                 });
               }
             }
@@ -144,7 +144,7 @@ async function fetchMangaInfo(mangaId) {
         ?.text()
         ?.trim()
         ?.toLowerCase();
-      mangaInfo.image = `/api/image?url=${LeftSections.find("picture > img").attr("src")}`;
+      mangaInfo.image = LeftSections.find("picture > img").attr("src") || null;
       // extra info
       LeftSections.find("section")
         .eq(2)
@@ -250,7 +250,7 @@ async function fetchChapterPages(chapterId) {
     const pages = $("img")
       .map((index, img) => ({
         page: index + 1,
-        img: `/api/image?url=${$(img).attr("src")}`,
+        img: $(img).attr("src"),
       }))
       .get();
 
@@ -262,7 +262,7 @@ async function fetchChapterPages(chapterId) {
 
 module.exports = {
   name: "weebcentral",
-  version: "2.0.0",
+  version: "2.0.1",
   latestManga,
   searchManga,
   fetchMangaInfo,

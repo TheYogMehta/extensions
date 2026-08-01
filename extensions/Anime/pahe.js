@@ -46,7 +46,7 @@ async function SearchAnime(query, filters = {}) {
       results: data.data.map((item) => ({
         id: `${item.session}`,
         title: item.title,
-        image: item?.poster ? `/api/image?url=${item?.poster}` : null,
+        image: item?.poster,
       })),
     };
     return res;
@@ -73,7 +73,7 @@ async function fetchRecentEpisodes(filters = {}) {
       results: data.data.map((item) => ({
         id: `${item.anime_session}`,
         title: item.anime_title,
-        image: item?.snapshot ? `/api/image?url=${item?.snapshot}` : null,
+        image: item?.snapshot,
         episode: item.episode,
       })),
     };
@@ -104,7 +104,7 @@ async function AnimeInfo(id) {
     animeInfo.malid = MalId;
     animeInfo.title = $("div.title-wrapper > h1 > span").first().text();
     let image = $("div.anime-poster a").attr("href") ?? null;
-    animeInfo.image = image ? `/api/image?url=${image}` : null;
+    animeInfo.image = image;
     animeInfo.description = $("div.anime-summary").text();
     animeInfo.genres = $("div.anime-genre ul li")
       .map((i, el) => $(el).find("a").attr("title"))
@@ -313,7 +313,7 @@ async function extract(videoUrl, retries = 2, delay = 1000) {
 
 module.exports = {
   name: "pahe",
-  version: "3.1.2",
+  version: "3.1.3",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,
