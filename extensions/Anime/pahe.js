@@ -233,14 +233,8 @@ async function fetchEpisodeSources(episodeId) {
       audio: $(el).attr("data-audio"),
     }));
 
-    let iSource = {
-      dub: {
-        sources: [],
-      },
-      sub: {
-        sources: [],
-      },
-    };
+    const subQualities = [];
+    const dubQualities = [];
 
     await Promise.all(
       links.get().map((link) =>
@@ -249,12 +243,15 @@ async function fetchEpisodeSources(episodeId) {
             try {
               const res = await extract(new URL(link.url));
               if (res && res[0]) {
-                res[0].quality = link.quality;
-                res[0].isDub = link.audio === "eng";
-                if (res[0]?.isDub) {
-                  iSource.dub.sources.push(res[0]);
+                const qualityEntry = {
+                  url: res[0].url,
+                  quality: link.quality,
+                  isM3U8: res[0].isM3U8 || res[0].url.includes(".m3u8"),
+                };
+                if (link.audio === "eng") {
+                  dubQualities.push(qualityEntry);
                 } else {
-                  iSource.sub.sources.push(res[0]);
+                  subQualities.push(qualityEntry);
                 }
               }
             } catch (err) {
@@ -265,6 +262,40 @@ async function fetchEpisodeSources(episodeId) {
         ]),
       ),
     );
+
+    const sortQualities = (arr) =>
+      arr.sort(
+        (a, b) => parseInt(b.quality || "0") - parseInt(a.quality || "0"),
+      );
+
+    let iSource = {
+      dub: { sources: [] },
+      sub: { sources: [] },
+    };
+
+    if (subQualities.length > 0) {
+      sortQualities(subQualities);
+      iSource.sub.sources.push({
+        url: subQualities[0].url,
+        isM3U8: subQualities[0].isM3U8,
+        server: "Kwik",
+        quality: subQualities[0].quality,
+        qualities: subQualities,
+      });
+    }
+
+    if (dubQualities.length > 0) {
+      sortQualities(dubQualities);
+      iSource.dub.sources.push({
+        url: dubQualities[0].url,
+        isM3U8: dubQualities[0].isM3U8,
+        server: "Kwik",
+        quality: dubQualities[0].quality,
+        isDub: true,
+        qualities: dubQualities,
+      });
+    }
+
     return iSource;
   } catch (err) {
     console.error("Error fetching data from AnimePahe:", err);
@@ -313,7 +344,7 @@ async function extract(videoUrl, retries = 2, delay = 1000) {
 
 module.exports = {
   name: "pahe",
-  version: "3.1.3",
+  version: "3.1.4",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,
