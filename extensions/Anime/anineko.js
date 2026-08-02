@@ -280,23 +280,41 @@ async function fetchEpisodeSources(episodeId, category = null) {
 
     const servers = [];
 
-    $(".lang-group").each((i, panel) => {
-      const panelType = $(panel).attr("data-id");
+    $(".lang-group, .server-group, [data-id]").each((i, panel) => {
+      const panelType = (
+        $(panel).attr("data-id") ||
+        $(panel).attr("data-lang") ||
+        $(panel).attr("data-type") ||
+        ""
+      ).toLowerCase();
 
       $(panel)
-        .find("button.server-video")
+        .find("button.server-video, a.server-video, .server-item")
         .each((j, btn) => {
-          const videoUrl = $(btn).attr("data-video");
+          const videoUrl =
+            $(btn).attr("data-video") ||
+            $(btn).attr("data-url") ||
+            $(btn).attr("href");
           const cloned = $(btn).clone();
           cloned.find("span").remove();
           const serverName = cloned.text().trim() || "Server";
+          const btnType = (
+            $(btn).attr("data-type") ||
+            $(btn).attr("data-lang") ||
+            panelType
+          ).toLowerCase();
 
-          if (videoUrl) {
+          if (
+            videoUrl &&
+            videoUrl !== "#" &&
+            !videoUrl.startsWith("javascript:")
+          ) {
             servers.push({
               url: videoUrl,
               name: serverName,
-              type: panelType,
-              isDefault: $(btn).hasClass("default"),
+              type: btnType,
+              isDefault:
+                $(btn).hasClass("default") || $(btn).hasClass("active"),
             });
           }
         });
@@ -305,7 +323,27 @@ async function fetchEpisodeSources(episodeId, category = null) {
     let targetServers = servers;
     if (category) {
       const catLower = category.toLowerCase();
-      const filtered = servers.filter((s) => s.type === catLower);
+      const filtered = servers.filter((s) => {
+        const typeLower = (s.type || "").toLowerCase();
+        if (catLower === "hsub" || catLower === "hardsub") {
+          return (
+            typeLower.includes("hsub") ||
+            typeLower.includes("hardsub") ||
+            typeLower.includes("hard-sub")
+          );
+        } else if (catLower === "sub" || catLower === "softsub") {
+          return (
+            (typeLower.includes("sub") &&
+              !typeLower.includes("hsub") &&
+              !typeLower.includes("hardsub") &&
+              !typeLower.includes("hard-sub")) ||
+            typeLower === "sub"
+          );
+        } else if (catLower === "dub") {
+          return typeLower.includes("dub");
+        }
+        return typeLower === catLower;
+      });
       if (filtered.length > 0) {
         targetServers = filtered;
       }
@@ -546,7 +584,7 @@ async function processEmbedServer(server) {
 
 module.exports = {
   name: "anineko",
-  version: "3.0.0",
+  version: "3.0.1",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,
