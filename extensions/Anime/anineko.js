@@ -280,13 +280,26 @@ async function fetchEpisodeSources(episodeId, category = null) {
 
     const servers = [];
 
-    $(".lang-group, .server-group, [data-id]").each((i, panel) => {
-      const panelType = (
-        $(panel).attr("data-id") ||
+    $(".lang-group, .server-group, [data-lang]").each((i, panel) => {
+      let rawType = (
         $(panel).attr("data-lang") ||
         $(panel).attr("data-type") ||
+        $(panel).attr("data-id") ||
         ""
       ).toLowerCase();
+
+      let panelType = "";
+      if (
+        rawType.includes("hsub") ||
+        rawType.includes("hardsub") ||
+        rawType.includes("hard-sub")
+      ) {
+        panelType = "hsub";
+      } else if (rawType.includes("dub")) {
+        panelType = "dub";
+      } else if (rawType.includes("sub")) {
+        panelType = "sub";
+      }
 
       $(panel)
         .find("button.server-video, a.server-video, .server-item")
@@ -295,28 +308,38 @@ async function fetchEpisodeSources(episodeId, category = null) {
             $(btn).attr("data-video") ||
             $(btn).attr("data-url") ||
             $(btn).attr("href");
+          if (
+            !videoUrl ||
+            videoUrl === "#" ||
+            videoUrl.startsWith("javascript:")
+          )
+            return;
+
           const cloned = $(btn).clone();
           cloned.find("span").remove();
           const serverName = cloned.text().trim() || "Server";
-          const btnType = (
-            $(btn).attr("data-type") ||
+
+          let btnRaw = (
             $(btn).attr("data-lang") ||
-            panelType
+            $(btn).attr("data-type") ||
+            ""
           ).toLowerCase();
 
-          if (
-            videoUrl &&
-            videoUrl !== "#" &&
-            !videoUrl.startsWith("javascript:")
-          ) {
-            servers.push({
-              url: videoUrl,
-              name: serverName,
-              type: btnType,
-              isDefault:
-                $(btn).hasClass("default") || $(btn).hasClass("active"),
-            });
+          let btnType = panelType;
+          if (btnRaw.includes("hsub") || btnRaw.includes("hardsub")) {
+            btnType = "hsub";
+          } else if (btnRaw.includes("dub")) {
+            btnType = "dub";
+          } else if (btnRaw.includes("sub") && !btnRaw.includes("hsub")) {
+            btnType = "sub";
           }
+
+          servers.push({
+            url: videoUrl,
+            name: serverName,
+            type: btnType || "sub",
+            isDefault: $(btn).hasClass("default") || $(btn).hasClass("active"),
+          });
         });
     });
 
@@ -326,21 +349,11 @@ async function fetchEpisodeSources(episodeId, category = null) {
       const filtered = servers.filter((s) => {
         const typeLower = (s.type || "").toLowerCase();
         if (catLower === "hsub" || catLower === "hardsub") {
-          return (
-            typeLower.includes("hsub") ||
-            typeLower.includes("hardsub") ||
-            typeLower.includes("hard-sub")
-          );
+          return typeLower === "hsub" || typeLower === "hardsub";
         } else if (catLower === "sub" || catLower === "softsub") {
-          return (
-            (typeLower.includes("sub") &&
-              !typeLower.includes("hsub") &&
-              !typeLower.includes("hardsub") &&
-              !typeLower.includes("hard-sub")) ||
-            typeLower === "sub"
-          );
+          return typeLower === "sub" || typeLower === "softsub";
         } else if (catLower === "dub") {
-          return typeLower.includes("dub");
+          return typeLower === "dub";
         }
         return typeLower === catLower;
       });
