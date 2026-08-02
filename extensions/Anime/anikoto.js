@@ -363,7 +363,7 @@ async function processServer(server) {
   return null;
 }
 
-async function fetchEpisodeSources(episodeIdStr) {
+async function fetchEpisodeSources(episodeIdStr, category = null) {
   try {
     const parts = episodeIdStr.split("|");
     const epId = parts[0];
@@ -378,12 +378,6 @@ async function fetchEpisodeSources(episodeIdStr) {
 
     const $ = cheerio.load(serverRes.data.result);
 
-    let iSource = {
-      dub: { sources: [] },
-      sub: { sources: [] },
-      hsub: { sources: [] },
-    };
-
     let selector =
       ".type[data-type='sub'] li, .type[data-type='dub'] li, .type[data-type='hsub'] li";
 
@@ -397,59 +391,47 @@ async function fetchEpisodeSources(episodeIdStr) {
       });
     });
 
-    const results = await Promise.all(
-      servers.map((s) =>
-        Promise.race([
-          processServer(s),
-          new Promise((resolve) => setTimeout(() => resolve(null), 4000)),
-        ]),
-      ),
-    );
-    const validResults = results.filter(Boolean);
-    const anySubtitles = validResults.find(
-      (r) => r.subtitles && r.subtitles.length > 0,
-    )?.subtitles;
-
-    const dubResults = validResults.filter((r) => r.isDub || r.type === "dub");
-    const hsubResults = validResults.filter(
-      (r) => r.isHsub || r.type === "hsub",
-    );
-    const subResults = validResults.filter(
-      (r) => !r.isDub && !r.isHsub && r.type !== "dub" && r.type !== "hsub",
-    );
-
-    iSource.dub.sources = dubResults.map(({ subtitles, ...rest }) => rest);
-    iSource.hsub.sources = hsubResults.map(({ subtitles, ...rest }) => rest);
-    iSource.sub.sources = subResults.map(({ subtitles, ...rest }) => rest);
-
-    const dubSubtitles = dubResults.find(
-      (r) => r.subtitles && r.subtitles.length > 0,
-    )?.subtitles;
-    const subSubtitles = subResults.find(
-      (r) => r.subtitles && r.subtitles.length > 0,
-    )?.subtitles;
-
-    if (dubSubtitles || subSubtitles || anySubtitles) {
-      iSource.dub.subtitles = dubSubtitles || subSubtitles || anySubtitles;
-      iSource.sub.subtitles = subSubtitles || dubSubtitles || anySubtitles;
-    }
-    if (anySubtitles) {
-      iSource.subtitles = anySubtitles;
+    let targetServers = servers;
+    if (category) {
+      const catLower = category.toLowerCase();
+      const filtered = servers.filter((s) => s.type === catLower);
+      if (filtered.length > 0) {
+        targetServers = filtered;
+      }
     }
 
-    return iSource;
+    const requestedCategory = (category || "sub").toLowerCase();
+    if (targetServers.length === 0) {
+      return { sources: [], subtitles: [] };
+    }
+
+    const sources = targetServers.map((s) => ({
+      quality: s.name,
+      name: s.name,
+      linkId: s.linkId,
+      lang: s.type || requestedCategory,
+      type: s.type || requestedCategory,
+      isUnresolved: true,
+      rawServer: s,
+    }));
+
+    return {
+      sources,
+      subtitles: [],
+    };
   } catch (err) {
     console.error("Error fetching data from AnikotoTV:", err);
-    return { sources: [] };
+    return { sources: [], subtitles: [] };
   }
 }
 
 module.exports = {
   name: "anikoto",
-  version: "4.0.9",
+  version: "5.0.0",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,
+  processServer,
   fetchRecentEpisodes,
   fetchEpisode,
 };

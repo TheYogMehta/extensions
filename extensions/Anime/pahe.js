@@ -218,7 +218,7 @@ async function fetchEpisode(id, page = 1) {
 }
 
 // fetching Episodes Download Links
-async function fetchEpisodeSources(episodeId) {
+async function fetchEpisodeSources(episodeId, category = null) {
   try {
     const { data } = await global.axios.get(`${baseUrl}/play/${episodeId}`, {
       headers: {
@@ -227,81 +227,90 @@ async function fetchEpisodeSources(episodeId) {
     });
     const $ = (0, cheerio.load)(data);
 
-    const links = $("div#resolutionMenu > button").map((i, el) => ({
-      url: $(el).attr("data-src"),
-      quality: extractQualityNumber($(el).text()),
-      audio: $(el).attr("data-audio"),
+    let linksArray = $("div#resolutionMenu > button")
+      .map((i, el) => ({
+        url: $(el).attr("data-src"),
+        quality: extractQualityNumber($(el).text()),
+        audio: $(el).attr("data-audio"),
+      }))
+      .get();
+
+    if (category) {
+      const catLower = category.toLowerCase();
+      if (catLower === "dub") {
+        const filtered = linksArray.filter((l) => l.audio === "eng");
+        if (filtered.length > 0) linksArray = filtered;
+      } else if (catLower === "sub") {
+        const filtered = linksArray.filter((l) => l.audio !== "eng");
+        if (filtered.length > 0) linksArray = filtered;
+      }
+    }
+
+    if (linksArray.length === 0) {
+      return { sources: [], subtitles: [] };
+    }
+
+    const sources = linksArray.map((l) => ({
+      quality: l.quality || "auto",
+      name: `Server ${l.quality}`,
+      url: l.url,
+      lang: l.audio === "eng" ? "dub" : "sub",
+      type: l.audio === "eng" ? "dub" : "sub",
+      isUnresolved: true,
+      rawServer: l,
     }));
 
-    const subQualities = [];
-    const dubQualities = [];
-
-    await Promise.all(
-      links.get().map((link) =>
-        Promise.race([
-          (async () => {
-            try {
-              const res = await extract(new URL(link.url));
-              if (res && res[0]) {
-                const qualityEntry = {
-                  url: res[0].url,
-                  quality: link.quality,
-                  isM3U8: res[0].isM3U8 || res[0].url.includes(".m3u8"),
-                };
-                if (link.audio === "eng") {
-                  dubQualities.push(qualityEntry);
-                } else {
-                  subQualities.push(qualityEntry);
-                }
-              }
-            } catch (err) {
-              console.error("Failed to extract link:", err.message);
-            }
-          })(),
-          new Promise((resolve) => setTimeout(resolve, 4000)),
-        ]),
-      ),
-    );
-
-    const sortQualities = (arr) =>
-      arr.sort(
-        (a, b) => parseInt(b.quality || "0") - parseInt(a.quality || "0"),
-      );
-
-    let iSource = {
-      dub: { sources: [] },
-      sub: { sources: [] },
+    return {
+      sources,
+      subtitles: [],
     };
-
-    if (subQualities.length > 0) {
-      sortQualities(subQualities);
-      iSource.sub.sources.push({
-        url: subQualities[0].url,
-        isM3U8: subQualities[0].isM3U8,
-        server: "Kwik",
-        quality: subQualities[0].quality,
-        qualities: subQualities,
-      });
-    }
-
-    if (dubQualities.length > 0) {
-      sortQualities(dubQualities);
-      iSource.dub.sources.push({
-        url: dubQualities[0].url,
-        isM3U8: dubQualities[0].isM3U8,
-        server: "Kwik",
-        quality: dubQualities[0].quality,
-        isDub: true,
-        qualities: dubQualities,
-      });
-    }
-
-    return iSource;
   } catch (err) {
     console.error("Error fetching data from AnimePahe:", err);
-    return { sources: [] };
+    return { sources: [], subtitles: [] };
   }
 }
+
+async function processServer(server) {
+  if (!server?.url) return null;
+  try {
+    const embedUrlObj = new URL(server.url);
+    const playerReferer = embedUrlObj.origin + "/";
+    const res = await extract(embedUrlObj);
+    if (res && res[0]) {
+      const streamUrl = res[0].url;
+      try {
+        const streamDomain = new URL(streamUrl).hostname;
+        if (global.setDynamicReferer) {
+          global.setDynamicReferer(streamDomain, playerReferer);
+          global.setFallbackReferer(playerReferer);
+        }
+      } catch (e) {}
+
+      return {
+        url: streamUrl,
+        quality: server.quality || "auto",
+        isM3U8: res[0].isM3U8 || streamUrl.includes(".m3u8"),
+        headers: { Referer: playerReferer },
+        lang: server.audio === "eng" ? "dub" : "sub",
+        type: server.audio === "eng" ? "dub" : "sub",
+      };
+    }
+  } catch (err) {
+    console.error("Failed to extract server:", err.message);
+  }
+  return null;
+}
+
+module.exports = {
+  name: "pahe",
+  version: "3.1.4",
+  SearchAnime,
+  AnimeInfo,
+  fetchEpisodeSources,
+  processServer,
+  fetchRecentEpisodes,
+  fetchEpisode,
+};
 
 // helpers for extracting video links
 function extractQualityNumber(qualityString) {
@@ -314,7 +323,11 @@ async function extract(videoUrl, retries = 2, delay = 1000) {
   let sources = [];
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      const { data } = await global.axios.get(videoUrl.href);
+      const { data } = await global.axios.get(videoUrl.href, {
+        headers: {
+          Referer: "https://animepahe.pw/",
+        },
+      });
       const match = /(eval)(\(f.*?)(<\/script>)/s.exec(data);
       if (!match) {
         throw new Error("Failed to find video source packer block");
@@ -344,10 +357,11 @@ async function extract(videoUrl, retries = 2, delay = 1000) {
 
 module.exports = {
   name: "pahe",
-  version: "3.1.4",
+  version: "4.0.0",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,
+  processServer,
   fetchRecentEpisodes,
   fetchEpisode,
 };
