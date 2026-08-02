@@ -346,7 +346,7 @@ async function fetchEpisodeSources(episodeId, category = null) {
     let targetServers = servers;
     if (category) {
       const catLower = category.toLowerCase();
-      const filtered = servers.filter((s) => {
+      targetServers = servers.filter((s) => {
         const typeLower = (s.type || "").toLowerCase();
         if (catLower === "hsub" || catLower === "hardsub") {
           return typeLower === "hsub" || typeLower === "hardsub";
@@ -357,9 +357,6 @@ async function fetchEpisodeSources(episodeId, category = null) {
         }
         return typeLower === catLower;
       });
-      if (filtered.length > 0) {
-        targetServers = filtered;
-      }
     }
 
     const requestedCategory = (category || "sub").toLowerCase();

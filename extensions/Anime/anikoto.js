@@ -394,10 +394,17 @@ async function fetchEpisodeSources(episodeIdStr, category = null) {
     let targetServers = servers;
     if (category) {
       const catLower = category.toLowerCase();
-      const filtered = servers.filter((s) => s.type === catLower);
-      if (filtered.length > 0) {
-        targetServers = filtered;
-      }
+      targetServers = servers.filter((s) => {
+        const typeLower = (s.type || "").toLowerCase();
+        if (catLower === "hsub" || catLower === "hardsub") {
+          return typeLower === "hsub" || typeLower === "hardsub";
+        } else if (catLower === "sub" || catLower === "softsub") {
+          return typeLower === "sub" || typeLower === "softsub";
+        } else if (catLower === "dub") {
+          return typeLower === "dub";
+        }
+        return typeLower === catLower;
+      });
     }
 
     const requestedCategory = (category || "sub").toLowerCase();
