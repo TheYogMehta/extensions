@@ -234,6 +234,18 @@ async function fetchEpisode(id, page = 1) {
       if (badges.includes("HSUB") || badges.includes("HARDSUB"))
         langs.push("hsub");
       if (badges.includes("DUB")) langs.push("dub");
+      if (
+        badges.includes("SOFTSUB") ||
+        badges.includes("SOFT SUB") ||
+        badges.includes("SOFT-SUB")
+      )
+        langs.push("sub");
+      if (
+        badges.includes("SOFTDUB") ||
+        badges.includes("SOFT DUB") ||
+        badges.includes("SOFT-DUB")
+      )
+        langs.push("dub");
 
       const watchPathMatch = href.match(/\/watch\/(.+)$/);
       const epSlug = watchPathMatch ? watchPathMatch[1] : `${id}/ep-${epNum}`;
@@ -266,7 +278,11 @@ async function fetchEpisodeSources(episodeId) {
     );
     const $ = cheerio.load(html);
 
-    let iSource = { dub: { sources: [] }, sub: { sources: [] } };
+    let iSource = {
+      dub: { sources: [] },
+      sub: { sources: [] },
+      hsub: { sources: [] },
+    };
 
     const servers = [];
 
@@ -313,10 +329,16 @@ async function fetchEpisodeSources(episodeId) {
 
     const validResults = results.filter(Boolean);
 
-    const dubResults = validResults.filter((r) => r.isDub);
-    const subResults = validResults.filter((r) => !r.isDub);
+    const dubResults = validResults.filter((r) => r.isDub || r.type === "dub");
+    const hsubResults = validResults.filter(
+      (r) => r.isHsub || r.type === "hsub",
+    );
+    const subResults = validResults.filter(
+      (r) => !r.isDub && !r.isHsub && r.type !== "dub" && r.type !== "hsub",
+    );
 
     iSource.dub.sources = dubResults.map(({ subtitles, ...rest }) => rest);
+    iSource.hsub.sources = hsubResults.map(({ subtitles, ...rest }) => rest);
     iSource.sub.sources = subResults.map(({ subtitles, ...rest }) => rest);
 
     const anySubtitles = validResults.find(
@@ -499,6 +521,8 @@ async function processEmbedServer(server) {
         isM3U8: true,
         quality: qualityLabel,
         isDub: server.type === "dub",
+        isHsub: server.type === "hsub",
+        type: server.type,
         headers: { Referer: new URL(embedUrl).origin + "/" },
         subtitles: subtitles.length > 0 ? subtitles : undefined,
       };
@@ -528,6 +552,8 @@ async function processEmbedServer(server) {
         isM3U8: false,
         quality: qualityLabel,
         isDub: server.type === "dub",
+        isHsub: server.type === "hsub",
+        type: server.type,
         headers: { Referer: new URL(embedUrl).origin + "/" },
         subtitles: subtitles.length > 0 ? subtitles : undefined,
       };
@@ -542,7 +568,7 @@ async function processEmbedServer(server) {
 
 module.exports = {
   name: "anineko",
-  version: "2.0.4",
+  version: "2.0.5",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,

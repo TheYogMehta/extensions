@@ -350,6 +350,8 @@ async function processServer(server) {
           isM3U8: true,
           quality: server.name || "auto",
           isDub: server.type === "dub",
+          isHsub: server.type === "hsub",
+          type: server.type,
           headers: { Referer: playerReferer },
           subtitles: subtitles,
         };
@@ -376,9 +378,14 @@ async function fetchEpisodeSources(episodeIdStr) {
 
     const $ = cheerio.load(serverRes.data.result);
 
-    let iSource = { dub: { sources: [] }, sub: { sources: [] } };
+    let iSource = {
+      dub: { sources: [] },
+      sub: { sources: [] },
+      hsub: { sources: [] },
+    };
 
-    let selector = ".type[data-type='sub'] li, .type[data-type='dub'] li";
+    let selector =
+      ".type[data-type='sub'] li, .type[data-type='dub'] li, .type[data-type='hsub'] li";
 
     const servers = [];
     $(selector).each((i, el) => {
@@ -403,10 +410,16 @@ async function fetchEpisodeSources(episodeIdStr) {
       (r) => r.subtitles && r.subtitles.length > 0,
     )?.subtitles;
 
-    const dubResults = validResults.filter((r) => r.isDub);
-    const subResults = validResults.filter((r) => !r.isDub);
+    const dubResults = validResults.filter((r) => r.isDub || r.type === "dub");
+    const hsubResults = validResults.filter(
+      (r) => r.isHsub || r.type === "hsub",
+    );
+    const subResults = validResults.filter(
+      (r) => !r.isDub && !r.isHsub && r.type !== "dub" && r.type !== "hsub",
+    );
 
     iSource.dub.sources = dubResults.map(({ subtitles, ...rest }) => rest);
+    iSource.hsub.sources = hsubResults.map(({ subtitles, ...rest }) => rest);
     iSource.sub.sources = subResults.map(({ subtitles, ...rest }) => rest);
 
     const dubSubtitles = dubResults.find(
@@ -433,7 +446,7 @@ async function fetchEpisodeSources(episodeIdStr) {
 
 module.exports = {
   name: "anikoto",
-  version: "4.0.8",
+  version: "4.0.9",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,
