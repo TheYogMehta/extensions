@@ -128,12 +128,22 @@ async function fetchMangaInfo(mangaId) {
 async function fetchChapters(mangaId) {
   try {
     const realId = mangaId.replace("mf-", "");
-    const { data } = await global.axios.get(
-      `https://api.mangadex.org/manga/${realId}/feed?translatedLanguage[]=en&order[chapter]=desc&limit=500`,
+    const contentRatings =
+      "&contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica&contentRating[]=pornographic";
+    let res = await global.axios.get(
+      `https://api.mangadex.org/manga/${realId}/feed?translatedLanguage[]=en${contentRatings}&order[chapter]=desc&limit=500`,
     );
+    let data = res.data;
+    if (!data?.data || data.data.length === 0) {
+      res = await global.axios.get(
+        `https://api.mangadex.org/manga/${realId}/feed?${contentRatings.slice(1)}&order[chapter]=desc&limit=500`,
+      );
+      data = res.data;
+    }
     const chapters = (data?.data || []).map((ch) => ({
       id: `mfch-${ch.id}`,
       number: parseFloat(ch.attributes?.chapter) || 0,
+      title: ch.attributes?.title || `Chapter ${ch.attributes?.chapter || ""}`,
     }));
 
     return {

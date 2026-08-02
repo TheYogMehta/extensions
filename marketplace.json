@@ -26,12 +26,7 @@
       "MinAppVersion": "7.0.0",
       "disabled": false
     },
-    {
-      "name": "allmanga",
-      "version": "3.0.0",
-      "MinAppVersion": "7.0.0",
-      "disabled": false
-    },
+
     {
       "name": "asurascans",
       "version": "1.0.0",
