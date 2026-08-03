@@ -17,7 +17,7 @@ const baseUrl = "https://asurascans.com";
 
 async function latestManga(page = 1) {
   try {
-    const { data } = await global.axios.get(`${baseUrl}/?page=${page}`);
+    const { data } = await global.axios.get(`${baseUrl}/browse?page=${page}`);
     const $ = cheerio.load(data);
     const results = [];
 
@@ -46,9 +46,20 @@ async function latestManga(page = 1) {
       }
     });
 
+    let totalPages = null;
+    const bodyText = $("body").text();
+    const match =
+      bodyText.match(/Browse\s*Series\s*(\d+)/i) ||
+      bodyText.match(/Series\s*(\d+)/i);
+    if (match) {
+      const totalSeries = parseInt(match[1], 10);
+      totalPages = Math.ceil(totalSeries / (results.length || 20));
+    }
+
     return {
       current_page: page,
-      hasNextPage: results.length > 0,
+      totalPages: totalPages,
+      hasNextPage: totalPages ? page < totalPages : results.length > 0,
       results: results,
     };
   } catch (err) {
@@ -75,7 +86,11 @@ async function searchManga(query, page = 1) {
 
       const imgEl = $(el).find("img");
       const image = imgEl.attr("src") || imgEl.attr("data-src") || null;
-      let title = $(el).text().trim().replace(/^[\d.]+\s*/, "").trim();
+      let title = $(el)
+        .text()
+        .trim()
+        .replace(/^[\d.]+\s*/, "")
+        .trim();
 
       const qLower = (query || "").toLowerCase();
       if (
@@ -176,8 +191,7 @@ async function fetchChapters(mangaId) {
 
       const text = $(el).text().trim();
       const numMatch =
-        text.match(/chapter\s*([\d.]+)/i) ||
-        href.match(/chapter\/([\d.]+)/i);
+        text.match(/chapter\s*([\d.]+)/i) || href.match(/chapter\/([\d.]+)/i);
       const number = numMatch ? parseFloat(numMatch[1]) : 0;
 
       if (!chapters.some((c) => c.id === chapId)) {
@@ -230,7 +244,7 @@ async function fetchChapterPages(chapterId) {
 
 module.exports = {
   name: "asurascans",
-  version: "1.0.0",
+  version: "1.0.1",
   latestManga,
   searchManga,
   fetchMangaInfo,
