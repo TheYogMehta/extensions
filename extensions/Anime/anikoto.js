@@ -276,8 +276,16 @@ async function processServer(server) {
       },
     );
 
-    const iframeUrl = linkRes.data?.result?.url;
-    if (!iframeUrl) return null;
+    let iframeUrl =
+      linkRes.data?.result?.url ||
+      linkRes.data?.url ||
+      (typeof linkRes.data?.result === "string" ? linkRes.data.result : null);
+    if (!iframeUrl && typeof linkRes.data?.result === "string") {
+      const match = linkRes.data.result.match(/src=["']([^"']+)["']/);
+      if (match) iframeUrl = match[1];
+    }
+    if (!iframeUrl || typeof iframeUrl !== "string") return null;
+    if (iframeUrl.startsWith("//")) iframeUrl = "https:" + iframeUrl;
 
     const iframeRes = await global.axios.get(iframeUrl, {
       headers: {
@@ -287,7 +295,13 @@ async function processServer(server) {
     });
 
     const $iframe = cheerio.load(iframeRes.data);
-    const playerDbId = $iframe("#megaplay-player").attr("data-id");
+    let playerDbId =
+      $iframe("#megaplay-player").attr("data-id") ||
+      $iframe("[data-id]").attr("data-id");
+    if (!playerDbId) {
+      const match = iframeRes.data.match(/data-id=["']([^"']+)["']/);
+      if (match) playerDbId = match[1];
+    }
     if (!playerDbId) return null;
 
     const typeMatch =
@@ -434,7 +448,7 @@ async function fetchEpisodeSources(episodeIdStr, category = null) {
 
 module.exports = {
   name: "anikoto",
-  version: "5.0.0",
+  version: "5.0.1",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,

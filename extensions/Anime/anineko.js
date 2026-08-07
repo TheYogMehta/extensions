@@ -525,17 +525,29 @@ async function processEmbedServer(server) {
     }
 
     if (m3u8Match) {
-      const m3u8Url = m3u8Match[0].replace(/["'\\]/g, "");
+      let m3u8Url = m3u8Match[0].replace(/["'\\]/g, "");
+      if (m3u8Url.startsWith("//")) {
+        m3u8Url = "https:" + m3u8Url;
+      } else if (
+        !m3u8Url.startsWith("http://") &&
+        !m3u8Url.startsWith("https://")
+      ) {
+        try {
+          m3u8Url = new URL(m3u8Url, embedUrl).href;
+        } catch (e) {}
+      }
 
       try {
         const cdnDomain = new URL(m3u8Url).hostname;
         const embedDomain = new URL(embedUrl).origin + "/";
-        global.setDynamicReferer(cdnDomain, embedDomain);
-        global.setFallbackReferer(embedDomain);
+        if (global.setDynamicReferer) {
+          global.setDynamicReferer(cdnDomain, embedDomain);
+          global.setFallbackReferer(embedDomain);
+        }
         for (const sub of subtitles) {
           try {
             const subDomain = new URL(sub.url).hostname;
-            if (subDomain !== cdnDomain) {
+            if (subDomain !== cdnDomain && global.setDynamicReferer) {
               global.setDynamicReferer(subDomain, embedDomain);
             }
           } catch (_) {}
@@ -557,16 +569,28 @@ async function processEmbedServer(server) {
       /["']?file["']?\s*:\s*["']([^"']+\.mp4[^"']*)["']/,
     );
     if (mp4Match) {
-      const mp4Url = mp4Match[1];
+      let mp4Url = mp4Match[1];
+      if (mp4Url.startsWith("//")) {
+        mp4Url = "https:" + mp4Url;
+      } else if (
+        !mp4Url.startsWith("http://") &&
+        !mp4Url.startsWith("https://")
+      ) {
+        try {
+          mp4Url = new URL(mp4Url, embedUrl).href;
+        } catch (e) {}
+      }
       try {
         const cdnDomain = new URL(mp4Url).hostname;
         const embedDomain = new URL(embedUrl).origin + "/";
-        global.setDynamicReferer(cdnDomain, embedDomain);
-        global.setFallbackReferer(embedDomain);
+        if (global.setDynamicReferer) {
+          global.setDynamicReferer(cdnDomain, embedDomain);
+          global.setFallbackReferer(embedDomain);
+        }
         for (const sub of subtitles) {
           try {
             const subDomain = new URL(sub.url).hostname;
-            if (subDomain !== cdnDomain) {
+            if (subDomain !== cdnDomain && global.setDynamicReferer) {
               global.setDynamicReferer(subDomain, embedDomain);
             }
           } catch (_) {}
@@ -594,7 +618,7 @@ async function processEmbedServer(server) {
 
 module.exports = {
   name: "anineko",
-  version: "3.0.1",
+  version: "3.0.2",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,
