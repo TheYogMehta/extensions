@@ -219,39 +219,60 @@ async function AnimeInfo(id) {
 
 async function fetchEpisode(dataId, page = 1) {
   try {
-    const url = `${baseUrl}/ajax/episode/list/${dataId}`;
+    let numericId = dataId;
+    if (!/^\d+$/.test(String(dataId))) {
+      try {
+        const { data: watchHtml } = await global.axios.get(
+          `${baseUrl}/watch/${dataId}`,
+        );
+        const $w = cheerio.load(watchHtml);
+        numericId =
+          $w("#watch-main").attr("data-id") ||
+          $w("[data-id]").attr("data-id") ||
+          $w("#wrapper").attr("data-id");
+      } catch (e) {}
+    }
+
+    if (!numericId) {
+      return { episodes: [], totalPages: 0, total: 0, currentPage: page };
+    }
+
+    const url = `${baseUrl}/ajax/episode/list/${numericId}`;
     const { data } = await global.axios.get(url, {
       headers: {
         "X-Requested-With": "XMLHttpRequest",
       },
     });
 
-    const $ = cheerio.load(data.result);
+    const $ = cheerio.load(data.result || "");
     let episodes = [];
 
-    $("a[data-id][data-ids], .ep-item, li a").each((i, el) => {
-      const epNum = $(el).attr("data-num");
-      const epId = $(el).attr("data-id");
-      const dataIds = $(el).attr("data-ids");
-      const title =
-        $(el).attr("title") ||
-        $(el).find(".d-title").text().trim() ||
-        `Episode ${epNum}`;
+    $("a[data-id][data-ids], .ep-item, li a, .ssl-item, a.item").each(
+      (i, el) => {
+        const epNum =
+          $(el).attr("data-num") || $(el).attr("data-number") || String(i + 1);
+        const epId = $(el).attr("data-id");
+        const dataIds = $(el).attr("data-ids");
+        const title =
+          $(el).attr("title") ||
+          $(el).find(".d-title").text().trim() ||
+          `Episode ${epNum}`;
 
-      if (epId && dataIds) {
-        const langs = [];
-        if ($(el).attr("data-sub") === "1") langs.push("sub");
-        if ($(el).attr("data-dub") === "1") langs.push("dub");
+        if (epId && dataIds) {
+          const langs = [];
+          if ($(el).attr("data-sub") === "1") langs.push("sub");
+          if ($(el).attr("data-dub") === "1") langs.push("dub");
 
-        episodes.push({
-          id: `${epId}|${dataIds}`,
-          number: parseFloat(epNum),
-          title: title,
-          duration: "Unknown",
-          langs,
-        });
-      }
-    });
+          episodes.push({
+            id: `${epId}|${dataIds}`,
+            number: parseFloat(epNum),
+            title: title,
+            duration: "Unknown",
+            langs,
+          });
+        }
+      },
+    );
 
     return {
       episodes: episodes,
