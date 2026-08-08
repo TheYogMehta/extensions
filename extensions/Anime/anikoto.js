@@ -346,11 +346,15 @@ async function processServer(server) {
     );
 
     if (sourcesRes.data && sourcesRes.data.sources) {
+      const rawSrc = sourcesRes.data.sources;
       const m3u8Url =
-        sourcesRes.data.sources.file ||
-        (Array.isArray(sourcesRes.data.sources)
-          ? sourcesRes.data.sources[0]?.file
-          : null);
+        typeof rawSrc === "string"
+          ? rawSrc
+          : rawSrc.file ||
+            rawSrc.url ||
+            (Array.isArray(rawSrc)
+              ? rawSrc[0]?.file || rawSrc[0]?.url || (typeof rawSrc[0] === "string" ? rawSrc[0] : null)
+              : null);
       if (m3u8Url) {
         try {
           const cdnDomain = new URL(m3u8Url).hostname;
