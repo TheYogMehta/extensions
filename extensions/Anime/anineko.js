@@ -280,11 +280,15 @@ async function fetchEpisodeSources(episodeId, category = null) {
 
     const servers = [];
 
-    $(".lang-group, .server-group, [data-lang]").each((i, panel) => {
+    $(
+      ".lang-group, .server-group, .servers-group, [data-lang], [data-type], .dub, .sub, .hsub",
+    ).each((i, panel) => {
       let rawType = (
         $(panel).attr("data-lang") ||
         $(panel).attr("data-type") ||
         $(panel).attr("data-id") ||
+        $(panel).attr("class") ||
+        $(panel).attr("id") ||
         ""
       ).toLowerCase();
 
@@ -302,7 +306,7 @@ async function fetchEpisodeSources(episodeId, category = null) {
       }
 
       $(panel)
-        .find("button.server-video, a.server-video, .server-item")
+        .find("button.server-video, a.server-video, .server-item, button, a")
         .each((j, btn) => {
           const videoUrl =
             $(btn).attr("data-video") ||
@@ -322,6 +326,7 @@ async function fetchEpisodeSources(episodeId, category = null) {
           let btnRaw = (
             $(btn).attr("data-lang") ||
             $(btn).attr("data-type") ||
+            $(btn).attr("class") ||
             ""
           ).toLowerCase();
 
@@ -618,11 +623,12 @@ async function processEmbedServer(server) {
 
 module.exports = {
   name: "anineko",
-  version: "3.0.2",
+  version: "3.0.3",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,
   processServer: processEmbedServer,
+  processEmbedServer,
   fetchRecentEpisodes,
   fetchEpisode,
 };

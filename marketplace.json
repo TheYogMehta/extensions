@@ -2,20 +2,20 @@
   "Anime": [
     {
       "name": "anikoto",
-      "version": "5.0.1",
-      "MinAppVersion": "9.2.0",
+      "version": "5.0.2",
+      "MinAppVersion": "9.5.3",
       "disabled": false
     },
     {
       "name": "pahe",
-      "version": "4.0.0",
-      "MinAppVersion": "9.1.0",
+      "version": "4.0.1",
+      "MinAppVersion": "9.5.3",
       "disabled": false
     },
     {
       "name": "anineko",
-      "version": "3.0.2",
-      "MinAppVersion": "9.2.0",
+      "version": "3.0.3",
+      "MinAppVersion": "9.5.3",
       "disabled": false
     }
   ],

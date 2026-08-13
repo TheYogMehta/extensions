@@ -294,6 +294,7 @@ async function processServer(server) {
         headers: {
           "X-Requested-With": "XMLHttpRequest",
         },
+        timeout: 7000,
       },
     );
 
@@ -313,6 +314,7 @@ async function processServer(server) {
         "X-Requested-With": "XMLHttpRequest",
         Referer: baseUrl,
       },
+      timeout: 7000,
     });
 
     const $iframe = cheerio.load(iframeRes.data);
@@ -342,6 +344,7 @@ async function processServer(server) {
           "X-Requested-With": "XMLHttpRequest",
           Referer: playerReferer,
         },
+        timeout: 7000,
       },
     );
 
@@ -353,7 +356,9 @@ async function processServer(server) {
           : rawSrc.file ||
             rawSrc.url ||
             (Array.isArray(rawSrc)
-              ? rawSrc[0]?.file || rawSrc[0]?.url || (typeof rawSrc[0] === "string" ? rawSrc[0] : null)
+              ? rawSrc[0]?.file ||
+                rawSrc[0]?.url ||
+                (typeof rawSrc[0] === "string" ? rawSrc[0] : null)
               : null);
       if (m3u8Url) {
         try {
@@ -413,21 +418,39 @@ async function fetchEpisodeSources(episodeIdStr, category = null) {
       headers: {
         "X-Requested-With": "XMLHttpRequest",
       },
+      timeout: 7000,
     });
 
     const $ = cheerio.load(serverRes.data.result);
 
-    let selector =
-      ".type[data-type='sub'] li, .type[data-type='dub'] li, .type[data-type='hsub'] li";
-
     const servers = [];
-    $(selector).each((i, el) => {
-      const type = $(el).closest(".type").attr("data-type");
-      servers.push({
-        type: type,
-        linkId: $(el).attr("data-link-id"),
-        name: $(el).text().trim(),
-      });
+    $(
+      ".psps-links .item, .psps-links li, .type-server li, [data-type] li, li[data-link-id], li[data-id], .server-item",
+    ).each((i, el) => {
+      const parentWithType = $(el).closest("[data-type]");
+      let type =
+        $(el).attr("data-type") ||
+        (parentWithType.length ? parentWithType.attr("data-type") : "");
+      if (!type) {
+        const parentClass =
+          ($(el).attr("class") || "") +
+          " " +
+          ($(el).parent().attr("class") || "") +
+          " " +
+          ($(el).closest("[class]").attr("class") || "");
+        if (parentClass.includes("dub")) type = "dub";
+        else if (parentClass.includes("hsub")) type = "hsub";
+        else if (parentClass.includes("sub")) type = "sub";
+      }
+      const linkId = $(el).attr("data-link-id") || $(el).attr("data-id");
+      const name = $(el).text().trim() || $(el).find("a").text().trim();
+      if (linkId) {
+        servers.push({
+          type: (type || "sub").toLowerCase(),
+          linkId: linkId,
+          name: name || "Server",
+        });
+      }
     });
 
     let targetServers = servers;
@@ -444,6 +467,33 @@ async function fetchEpisodeSources(episodeIdStr, category = null) {
         }
         return typeLower === catLower;
       });
+
+      targetServers.sort((a, b) => {
+        const aName = (a.name || "").toLowerCase();
+        const bName = (b.name || "").toLowerCase();
+        const getServerScore = (n) => {
+          if (
+            n.includes("hd-1") ||
+            n.includes("megacloud") ||
+            n.includes("hd-2") ||
+            n.includes("megaplay") ||
+            n.includes("hd 1") ||
+            n.includes("hd 2")
+          )
+            return 10;
+          if (n.includes("vidplay")) return 8;
+          if (
+            n.includes("vidstream-1") ||
+            n.includes("vidstream 1") ||
+            n === "vidstream"
+          )
+            return 5;
+          if (n.includes("vidstream-2") || n.includes("vidstream 2")) return 1;
+          if (n.includes("vidstream")) return 2;
+          return 3;
+        };
+        return getServerScore(bName) - getServerScore(aName);
+      });
     }
 
     const requestedCategory = (category || "sub").toLowerCase();
@@ -457,6 +507,9 @@ async function fetchEpisodeSources(episodeIdStr, category = null) {
       linkId: s.linkId,
       lang: s.type || requestedCategory,
       type: s.type || requestedCategory,
+      isDub: (s.type || requestedCategory) === "dub",
+      isSub: (s.type || requestedCategory) === "sub",
+      isHsub: (s.type || requestedCategory) === "hsub",
       isUnresolved: true,
       rawServer: s,
     }));
@@ -473,7 +526,7 @@ async function fetchEpisodeSources(episodeIdStr, category = null) {
 
 module.exports = {
   name: "anikoto",
-  version: "5.0.1",
+  version: "5.0.2",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,

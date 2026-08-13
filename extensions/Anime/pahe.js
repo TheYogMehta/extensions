@@ -301,17 +301,6 @@ async function processServer(server) {
   return null;
 }
 
-module.exports = {
-  name: "pahe",
-  version: "3.1.4",
-  SearchAnime,
-  AnimeInfo,
-  fetchEpisodeSources,
-  processServer,
-  fetchRecentEpisodes,
-  fetchEpisode,
-};
-
 // helpers for extracting video links
 function extractQualityNumber(qualityString) {
   const match = qualityString.match(/\d+p/);
@@ -357,7 +346,7 @@ async function extract(videoUrl, retries = 2, delay = 1000) {
 
 module.exports = {
   name: "pahe",
-  version: "4.0.0",
+  version: "4.0.1",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,
