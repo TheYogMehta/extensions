@@ -23,6 +23,7 @@
  */
 
 const cheerio = require("cheerio");
+const crypto = require("crypto");
 
 const baseUrl = "https://anikototv.to";
 
@@ -114,7 +115,7 @@ async function fetchRecentEpisodes(filters = {}) {
   try {
     const page = filters?.page || 1;
     const { data: html } = await global.axios.get(
-      `${baseUrl}/latest-updated?page=${page}`,
+      `${baseUrl}/filter?keyword=&type=Latest+Updated&ep_min=&ep_max=&page=${page}&sort=latest-updated`,
     );
     const $ = cheerio.load(html);
     const results = [];
@@ -285,6 +286,29 @@ async function fetchEpisode(dataId, page = 1) {
   }
 }
 
+function decryptMegaplayEnc(encStr) {
+  if (!encStr || typeof encStr !== "string") return null;
+  try {
+    const key = Buffer.alloc(32);
+    Buffer.from("i?LMTAx0Q6,:}50U", "utf8").copy(key, 0, 0, 16);
+    const iv = Buffer.alloc(16);
+    Buffer.from("W0;27ToaUpl_P%'c", "utf8").copy(iv, 0, 0, 16);
+    let base64 = encStr.replace(/-/g, "+").replace(/_/g, "/");
+    const pad = base64.length % 4;
+    if (pad) {
+      base64 += "====".slice(pad);
+    }
+    const decipher = crypto.createDecipheriv("aes-256-cbc", key, iv);
+    const decrypted = Buffer.concat([
+      decipher.update(Buffer.from(base64, "base64")),
+      decipher.final(),
+    ]).toString("utf8");
+    return JSON.parse(decrypted);
+  } catch (e) {
+    return null;
+  }
+}
+
 async function processServer(server) {
   if (!server || !server.linkId) return null;
   try {
@@ -335,10 +359,16 @@ async function processServer(server) {
     const ciduMatch = iframeRes.data.match(/cidu\s*:\s*'([^']+)'/);
     const cidu = ciduMatch ? ciduMatch[1] : "";
 
+    let sParam = "";
+    try {
+      sParam = new URL(iframeUrl).searchParams.get("s") || "";
+    } catch (_) {}
+    if (!sParam) sParam = "bcdn";
+
     const domainName = new URL(iframeUrl).origin;
     const playerReferer = domainName + "/";
     const sourcesRes = await global.axios.get(
-      `${domainName}/stream/getSources?id=${playerDbId}${type ? `&type=${encodeURIComponent(type)}` : ""}${cidu ? `&cidu=${encodeURIComponent(cidu)}` : ""}`,
+      `${domainName}/stream/getSources?id=${playerDbId}${type ? `&type=${encodeURIComponent(type)}` : ""}${cidu ? `&cidu=${encodeURIComponent(cidu)}` : ""}${sParam ? `&s=${encodeURIComponent(sParam)}` : ""}`,
       {
         headers: {
           "X-Requested-With": "XMLHttpRequest",
@@ -348,9 +378,13 @@ async function processServer(server) {
       },
     );
 
-    if (sourcesRes.data && sourcesRes.data.sources) {
-      const rawSrc = sourcesRes.data.sources;
-      const m3u8Url =
+    let rawSrc = sourcesRes.data?.sources;
+    if (!rawSrc && sourcesRes.data?.enc) {
+      rawSrc = decryptMegaplayEnc(sourcesRes.data.enc);
+    }
+
+    if (rawSrc) {
+      let m3u8Url =
         typeof rawSrc === "string"
           ? rawSrc
           : rawSrc.file ||
@@ -360,6 +394,9 @@ async function processServer(server) {
                 rawSrc[0]?.url ||
                 (typeof rawSrc[0] === "string" ? rawSrc[0] : null)
               : null);
+      if (m3u8Url && m3u8Url.includes("cdn.imgnex.top")) {
+        m3u8Url = m3u8Url.replace("://cdn.imgnex.top", "://ncdn.imgnex.top");
+      }
       if (m3u8Url) {
         try {
           const cdnDomain = new URL(m3u8Url).hostname;
@@ -388,6 +425,19 @@ async function processServer(server) {
               lang: t.label || t.language || "English",
             };
           });
+
+        if (Array.isArray(subtitles) && global.setDynamicReferer) {
+          for (const s of subtitles) {
+            try {
+              if (s.url) {
+                global.setDynamicReferer(
+                  new URL(s.url).hostname,
+                  playerReferer,
+                );
+              }
+            } catch (_) {}
+          }
+        }
 
         return {
           url: m3u8Url,
@@ -526,7 +576,7 @@ async function fetchEpisodeSources(episodeIdStr, category = null) {
 
 module.exports = {
   name: "anikoto",
-  version: "5.0.2",
+  version: "5.0.3",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,

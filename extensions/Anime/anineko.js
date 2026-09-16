@@ -106,7 +106,7 @@ async function fetchRecentEpisodes(filters = {}) {
   try {
     const page = filters?.page || 1;
     const { data: html } = await global.axios.get(
-      `${baseUrl}/updates?page=${page}`,
+      `${baseUrl}/browse?sort=recently_added&page=${page}`,
     );
     const $ = cheerio.load(html);
     const results = [];
@@ -623,7 +623,7 @@ async function processEmbedServer(server) {
 
 module.exports = {
   name: "anineko",
-  version: "3.0.3",
+  version: "3.0.4",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,

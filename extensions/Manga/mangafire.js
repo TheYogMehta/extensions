@@ -11,10 +11,6 @@
  * and developer testing purposes only.
  */
 
-const cheerio = require("cheerio");
-
-const baseUrl = "https://mangafire.to";
-
 async function latestManga(page = 1) {
   try {
     const limit = 30;
@@ -177,7 +173,7 @@ async function fetchChapterPages(chapterId) {
 
 module.exports = {
   name: "mangafire",
-  version: "1.0.0",
+  version: "1.0.1",
   latestManga,
   searchManga,
   fetchMangaInfo,
