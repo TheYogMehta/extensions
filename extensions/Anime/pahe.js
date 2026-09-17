@@ -28,6 +28,14 @@ const cheerio = require("cheerio");
 // variables
 const baseUrl = "https://animepahe.pw";
 
+function notifyRenderer(channel, payload) {
+  if (typeof global.sendToRenderer === "function") {
+    try {
+      global.sendToRenderer(channel, payload);
+    } catch (_) {}
+  }
+}
+
 let lastRequestTime = 0;
 const MIN_REQUEST_INTERVAL = 1500;
 
@@ -88,26 +96,26 @@ async function safeGet(url, config = {}, maxRetries = 5) {
             `[AnimePahe] Rate limited (Attempt ${attempt}/${maxRetries}). Waiting ${totalWaitSecs}s...`,
           );
           for (let sec = totalWaitSecs; sec > 0; sec--) {
-            global.sendToRenderer("catalog-loading-status", {
+            notifyRenderer("catalog-loading-status", {
               text: `Rate limited by AnimePahe. Retrying in ${sec}s...`,
             });
             await new Promise((resolve) => setTimeout(resolve, 1000));
           }
-          global.sendToRenderer("catalog-loading-status", {
+          notifyRenderer("catalog-loading-status", {
             text: "Retrying AnimePahe fetch...",
           });
           continue;
         }
       }
 
-      global.sendToRenderer("catalog-loading-status", {
+      notifyRenderer("catalog-loading-status", {
         text: "",
       });
       return response;
     } catch (err) {
       const status = err.response?.status;
       if (status === 404) {
-        global.sendToRenderer("catalog-loading-status", { text: "" });
+        notifyRenderer("catalog-loading-status", { text: "" });
         throw err;
       }
       if (status === 403 && attempt < maxRetries) {
@@ -126,7 +134,7 @@ async function safeGet(url, config = {}, maxRetries = 5) {
           `[AnimePahe] HTTP ${status || "Error"}. Waiting ${totalWaitSecs}s before retry ${attempt}/${maxRetries}...`,
         );
         for (let sec = totalWaitSecs; sec > 0; sec--) {
-          global.sendToRenderer("catalog-loading-status", {
+          notifyRenderer("catalog-loading-status", {
             text:
               status === 429
                 ? `Rate limited by AnimePahe. Retrying in ${sec}s...`
@@ -134,13 +142,13 @@ async function safeGet(url, config = {}, maxRetries = 5) {
           });
           await new Promise((resolve) => setTimeout(resolve, 1000));
         }
-        global.sendToRenderer("catalog-loading-status", {
+        notifyRenderer("catalog-loading-status", {
           text: "Retrying AnimePahe fetch...",
         });
 
         continue;
       }
-      global.sendToRenderer("catalog-loading-status", {
+      notifyRenderer("catalog-loading-status", {
         text: "",
       });
 
@@ -272,7 +280,7 @@ async function AnimeInfo(id) {
       console.warn(
         `[AnimePahe] UUID ${id} returned 404. Fetching /anime directory to auto-heal UUID...`,
       );
-      global.sendToRenderer("info-loading-status", {
+      notifyRenderer("info-loading-status", {
         text: "Auto-healing AnimePahe UUID from directory, please wait...",
       });
       let resolvedNewUuid = null;
@@ -359,12 +367,12 @@ async function AnimeInfo(id) {
           "[AnimePahe] Failed to recover from /anime index:",
           recoveryErr.message,
         );
-        global.sendToRenderer("info-loading-status", {
+        notifyRenderer("info-loading-status", {
           text: "",
         });
       }
 
-      global.sendToRenderer("info-loading-status", {
+      notifyRenderer("info-loading-status", {
         text: "Updating database with healed mapping, please wait...",
       });
 
@@ -603,7 +611,7 @@ async function extract(videoUrl, retries = 2, delay = 1000) {
 
 module.exports = {
   name: "pahe",
-  version: "5.0.0",
+  version: "5.0.1",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,
