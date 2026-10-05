@@ -83,7 +83,310 @@ function notifyRenderer(channel, payload) {
 let lastRequestTime = 0;
 const MIN_REQUEST_INTERVAL = 1500;
 
+let lastDirectorySyncTime = 0;
+let isDirectorySyncRunning = false;
+const DIRECTORY_SYNC_INTERVAL = 60 * 60 * 1000; // 1 hour
+
+async function getSavedSetting(key) {
+  if (!global.db) return null;
+  try {
+    const row = await global.db
+      .prepare("SELECT value FROM Settings WHERE key = ?")
+      .get(key);
+    return row ? row.value : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function setSavedSetting(key, value) {
+  if (!global.db) return;
+  try {
+    await global.db
+      .prepare("INSERT OR REPLACE INTO Settings (key, value) VALUES (?, ?)")
+      .run(key, String(value));
+  } catch (_) {}
+}
+
+async function getSavedOnePieceUuid() {
+  // 1. Check Settings in database.db
+  const fromSettings = await getSavedSetting("pahe_one_piece_uuid");
+  if (fromSettings) return fromSettings.trim();
+
+  // 2. Check mapping.db pahe table for One Piece (id '4' or malid 21)
+  if (global.mappingDb) {
+    try {
+      const row = await global.mappingDb
+        .prepare("SELECT uuid FROM pahe WHERE id = '4' OR malid = 21 LIMIT 1")
+        .get();
+      if (row?.uuid) return row.uuid.trim();
+    } catch (_) {}
+  }
+  return null;
+}
+
+async function syncPaheDirectory(brokenUuid = null) {
+  if (isDirectorySyncRunning) return null;
+  isDirectorySyncRunning = true;
+  lastDirectorySyncTime = Date.now();
+
+  try {
+    console.log("[AnimePahe] Starting 1h background /anime directory sync...");
+
+    let html = "";
+    // 1. Try in-app browser session first if Cloudflare clearance is available
+    if (typeof global.scrapperFetch === "function") {
+      try {
+        html = await global.scrapperFetch(`${baseUrl}/anime`);
+      } catch (_) {}
+    }
+
+    // 2. Try direct safeGet with skipDirectorySync
+    if (!html) {
+      try {
+        const catalogRes = await safeGet(
+          `${baseUrl}/anime`,
+          { skipDirectorySync: true },
+          2,
+        );
+        html = typeof catalogRes?.data === "string" ? catalogRes.data : "";
+      } catch (_) {}
+    }
+
+    // 3. Fallback to mirrors
+    if (!html) {
+      const mirrors = [
+        "https://animepahe.pw",
+        "https://animepahe.org",
+        "https://animepahe.com",
+        "https://animepahe.io",
+        "https://animepahe.ng",
+        "https://animepahe.ch",
+      ];
+      for (const m of mirrors) {
+        if (m === baseUrl) continue;
+        try {
+          if (typeof global.scrapperFetch === "function") {
+            html = await global.scrapperFetch(`${m}/anime`);
+          }
+          if (!html) {
+            const res = await safeGet(
+              `${m}/anime`,
+              { skipDirectorySync: true },
+              1,
+            );
+            html = typeof res?.data === "string" ? res.data : "";
+          }
+          if (html && (html.includes("/anime/") || html.includes("animepahe")))
+            break;
+        } catch (_) {}
+      }
+    }
+
+    if (!html) {
+      console.warn("[AnimePahe] Could not retrieve /anime directory HTML.");
+      return null;
+    }
+
+    const links = [];
+    let tsv = "";
+    try {
+      const $ = cheerio.load(html);
+      $("a[href*='/anime/']").each((_, el) => {
+        const href = $(el).attr("href") || "";
+        const match = href.match(
+          /\/anime\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i,
+        );
+        if (match) {
+          const u = match[1].toLowerCase().trim();
+          const n = ($(el).text().trim() || $(el).attr("title") || "")
+            .replace(/[\r\n\t]+/g, " ")
+            .trim();
+          if (u && n) {
+            links.push({ uuid: u, name: n });
+            tsv += `${u}\t${n}\n`;
+          }
+        }
+      });
+    } catch (_) {}
+
+    if (links.length === 0) {
+      const linkRegex =
+        /<a\s+[^>]*href="\/anime\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"[^>]*>([\s\S]*?)<\/a>/gi;
+      let m;
+      while ((m = linkRegex.exec(html)) !== null) {
+        const u = m[1].toLowerCase().trim();
+        const n = (m[2] || "")
+          .replace(/<[^>]+>/g, "")
+          .replace(/[\r\n\t]+/g, " ")
+          .trim();
+        if (u && n) {
+          links.push({ uuid: u, name: n });
+          tsv += `${u}\t${n}\n`;
+        }
+      }
+    }
+
+    if (links.length === 0) {
+      console.warn("[AnimePahe] No anime links found in /anime HTML.");
+      return null;
+    }
+
+    console.log(
+      `[AnimePahe] Parsed ${links.length} anime entries from /anime directory.`,
+    );
+
+    // Record last sync check time in Settings
+    await setSavedSetting("pahe_directory_sync_time", String(Date.now()));
+
+    // 4. One Piece UUID rotation canary check
+    const opEntry = links.find((l) => /^one piece$/i.test(l.name.trim()));
+    const currentOpUuid = opEntry?.uuid || null;
+    const savedOpUuid = await getSavedOnePieceUuid();
+
+    console.log(
+      `[AnimePahe] Canary One Piece UUID check - Current: ${currentOpUuid || "not found"}, Saved: ${savedOpUuid || "none"}`,
+    );
+
+    // If One Piece UUID hasn't changed and no brokenUuid requested, skip server sync!
+    if (
+      savedOpUuid &&
+      currentOpUuid &&
+      savedOpUuid.toLowerCase() === currentOpUuid.toLowerCase() &&
+      !brokenUuid
+    ) {
+      console.log(
+        `[AnimePahe] One Piece canary UUID unchanged (${currentOpUuid}). Skipping sync to server.`,
+      );
+      return {
+        links,
+        resolvedNewUuid: null,
+        version: null,
+        skipped: true,
+      };
+    }
+
+    console.log(
+      `[AnimePahe] UUID rotation detected or initial sync (current OP: ${currentOpUuid}, saved OP: ${savedOpUuid}). Posting catalog to mapping server...`,
+    );
+
+    // 5. Post to mapping index server so all entries are mapped to MAL IDs
+    const client = global.axios || require("axios");
+    const syncEndpoints = [
+      "https://strawverse.theyogmehta.online/api/pahe/index",
+      "http://localhost:33544/api/pahe/index",
+    ];
+
+    let syncRes = null;
+    for (const endpoint of syncEndpoints) {
+      try {
+        syncRes = await client.post(
+          endpoint,
+          { brokenUuid, catalog: tsv, links },
+          { timeout: 35000 },
+        );
+        if (syncRes?.status === 200 && syncRes.data?.success) {
+          console.log(
+            `[AnimePahe] Successfully synced directory to ${endpoint}. Server updated ${syncRes.data.updatedCount || 0} mappings.`,
+          );
+          break;
+        }
+      } catch (_) {}
+    }
+
+    // 6. If server returned updated mappings, apply directly to local mappingDb
+    if (
+      global.mappingDb &&
+      syncRes?.data?.updatedMappings &&
+      Array.isArray(syncRes.data.updatedMappings)
+    ) {
+      try {
+        let applied = 0;
+        for (const m of syncRes.data.updatedMappings) {
+          if (m.newUuid) {
+            if (m.id) {
+              await global.mappingDb
+                .prepare("UPDATE pahe SET uuid = ? WHERE id = ?")
+                .run(m.newUuid, m.id);
+              applied++;
+            } else if (m.malid) {
+              await global.mappingDb
+                .prepare("UPDATE pahe SET uuid = ? WHERE malid = ?")
+                .run(m.newUuid, m.malid);
+              applied++;
+            }
+          }
+        }
+        if (applied > 0) {
+          console.log(
+            `[AnimePahe] Applied ${applied} updated MAL ID mappings to local mappingDb.`,
+          );
+        }
+      } catch (errLocalMap) {
+        console.warn(
+          "[AnimePahe] Failed applying mappings to mappingDb:",
+          errLocalMap?.message,
+        );
+      }
+    }
+
+    // 7. Update One Piece in local mappingDb and Settings table
+    if (currentOpUuid) {
+      if (global.mappingDb) {
+        try {
+          await global.mappingDb
+            .prepare("UPDATE pahe SET uuid = ? WHERE id = '4' OR malid = 21")
+            .run(currentOpUuid);
+        } catch (_) {}
+      }
+      await setSavedSetting("pahe_one_piece_uuid", currentOpUuid);
+    }
+
+    // 8. Trigger mapping updates check so StrawVerse downloads latest delta release
+    if (typeof global.checkForMappingUpdates === "function") {
+      try {
+        await global.checkForMappingUpdates(true);
+      } catch (_) {}
+    }
+
+    return {
+      links,
+      resolvedNewUuid: syncRes?.data?.resolvedNewUuid || null,
+      version: syncRes?.data?.version || null,
+    };
+  } catch (err) {
+    console.error("[AnimePahe] Directory sync error:", err?.message);
+    return null;
+  } finally {
+    isDirectorySyncRunning = false;
+  }
+}
+
+async function triggerHourlyDirectorySync() {
+  const now = Date.now();
+  if (isDirectorySyncRunning) return;
+  if (now - lastDirectorySyncTime < DIRECTORY_SYNC_INTERVAL) return;
+
+  if (lastDirectorySyncTime === 0) {
+    try {
+      const savedTime = await getSavedSetting("pahe_directory_sync_time");
+      if (savedTime && now - Number(savedTime) < DIRECTORY_SYNC_INTERVAL) {
+        lastDirectorySyncTime = Number(savedTime);
+        return;
+      }
+    } catch (_) {}
+  }
+
+  lastDirectorySyncTime = now;
+  setTimeout(() => {
+    syncPaheDirectory().catch(() => {});
+  }, 200);
+}
+
 async function safeGet(url, config = {}, maxRetries = 5, opts = {}) {
+  if (!config.skipDirectorySync) {
+    triggerHourlyDirectorySync();
+  }
   const expectJson = !!opts.expectJson;
   let lastErr = null;
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -98,7 +401,8 @@ async function safeGet(url, config = {}, maxRetries = 5, opts = {}) {
 
     const variants = getBaseVariants(url);
     for (const tryUrl of variants) {
-      const tryBase = (/https:\/\/animepahe\.[a-z]+/i.exec(tryUrl) || [])[0] || baseUrl;
+      const tryBase =
+        (/https:\/\/animepahe\.[a-z]+/i.exec(tryUrl) || [])[0] || baseUrl;
       const isApi = tryUrl.includes("/api?");
       const mergedHeaders = {
         Referer: tryBase + "/",
@@ -165,7 +469,8 @@ async function safeGet(url, config = {}, maxRetries = 5, opts = {}) {
           data?.error_code === 1015 ||
           data?.title?.includes("rate limited") ||
           (typeof data === "string" &&
-            (data.includes("error code: 1015") || data.includes("rate limited")));
+            (data.includes("error code: 1015") ||
+              data.includes("rate limited")));
 
         if (isRateLimited) {
           if (attempt < maxRetries) {
@@ -209,11 +514,17 @@ async function safeGet(url, config = {}, maxRetries = 5, opts = {}) {
         const isDomainError =
           status === 403 ||
           !status ||
-          ["ENOTFOUND", "EAI_AGAIN", "ECONNRESET", "ETIMEDOUT", "ECONNREFUSED"].some(
-            (c) => String(err?.code || err?.message || "").includes(c),
-          );
+          [
+            "ENOTFOUND",
+            "EAI_AGAIN",
+            "ECONNRESET",
+            "ETIMEDOUT",
+            "ECONNREFUSED",
+          ].some((c) => String(err?.code || err?.message || "").includes(c));
         if (isDomainError) {
-          console.warn(`[AnimePahe] ${status || "Network"} on ${tryBase}, trying next mirror...`);
+          console.warn(
+            `[AnimePahe] ${status || "Network"} on ${tryBase}, trying next mirror...`,
+          );
           try {
             if (global.cloudflarebypass && status === 403) {
               await global.cloudflarebypass(tryUrl, false, tryBase + "/");
@@ -339,6 +650,15 @@ async function AnimeInfo(id) {
       parseInt($('meta[name="myanimelist"]').attr("content") ?? null) ?? null;
 
     animeInfo.malid = MalId;
+    if (MalId && id && global.mappingDb) {
+      try {
+        global.mappingDb
+          .prepare(
+            "INSERT INTO pahe (id, uuid, malid) VALUES (?, ?, ?) ON CONFLICT(malid) DO UPDATE SET uuid = excluded.uuid, id = excluded.id",
+          )
+          .run(id, id, MalId);
+      } catch (_) {}
+    }
     animeInfo.title = $("div.title-wrapper > h1 > span").first().text();
     const resolvePoster = (u) => {
       if (!u) return null;
@@ -401,81 +721,13 @@ async function AnimeInfo(id) {
       let resolvedNewUuid = null;
       let resolvedVersion = null;
       try {
-        let html = "";
-        if (typeof global.scrapperFetch === "function") {
-          try {
-            html = await global.scrapperFetch(`${baseUrl}/anime`);
-          } catch (_) {}
-        }
-        if (!html) {
-          const catalogRes = await safeGet(`${baseUrl}/anime`);
-          html = typeof catalogRes?.data === "string" ? catalogRes.data : "";
-        }
-
-        let links = [];
-        let tsv = "";
-        if (html) {
-          try {
-            const $ = (0, cheerio.load)(html);
-            $("a[href*='/anime/']").each((_, el) => {
-              const href = $(el).attr("href") || "";
-              const match = href.match(
-                /\/anime\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i,
-              );
-              if (match) {
-                const u = match[1].toLowerCase().trim();
-                const n = ($(el).text().trim() || $(el).attr("title") || "")
-                  .replace(/[\r\n\t]+/g, " ")
-                  .trim();
-                if (u && n) {
-                  links.push({ uuid: u, name: n });
-                  tsv += `${u}\t${n}\n`;
-                }
-              }
-            });
-          } catch (_) {}
-
-          if (links.length === 0) {
-            const linkRegex =
-              /<a\s+[^>]*href="\/anime\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"[^>]*>([\s\S]*?)<\/a>/gi;
-            let match;
-            while ((match = linkRegex.exec(html)) !== null) {
-              const u = match[1].toLowerCase().trim();
-              const n = match[2]
-                .replace(/<[^>]*>/g, "")
-                .replace(/[\r\n\t]+/g, " ")
-                .trim();
-              if (u && n) {
-                links.push({ uuid: u, name: n });
-                tsv += `${u}\t${n}\n`;
-              }
-            }
-          }
-        }
-
-        if (links.length > 0 && global.axios) {
-          const syncRes = await global.axios
-            .post(
-              "https://strawverse.theyogmehta.online/api/pahe/index",
-              { brokenUuid: id, catalog: tsv, links },
-              { timeout: 30000 },
-            )
-            .catch((err) => {
-              console.error(
-                "[AnimePahe] Failed to post index to server:",
-                err?.message,
-              );
-              return null;
-            });
-          if (syncRes?.data?.resolvedNewUuid) {
-            resolvedNewUuid = syncRes.data.resolvedNewUuid;
-            console.log(
-              `[AnimePahe] Server auto-healed UUID ${id} -> ${resolvedNewUuid}`,
-            );
-          }
-          if (syncRes?.data?.version) {
-            resolvedVersion = syncRes.data.version;
-          }
+        const syncResult = await syncPaheDirectory(id);
+        if (syncResult?.resolvedNewUuid) {
+          resolvedNewUuid = syncResult.resolvedNewUuid;
+          resolvedVersion = syncResult.version;
+          console.log(
+            `[AnimePahe] Server auto-healed UUID ${id} -> ${resolvedNewUuid}`,
+          );
         }
       } catch (recoveryErr) {
         console.error(
@@ -740,7 +992,7 @@ async function extract(videoUrl, retries = 2, delay = 1000) {
 
 module.exports = {
   name: "pahe",
-  version: "5.0.4",
+  version: "5.0.6",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,

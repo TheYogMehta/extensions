@@ -224,7 +224,13 @@ async function fetchRecentEpisodes(filters = {}) {
         ? String(filters.keyword)
         : "";
     let url;
-    if (!keyword && genreIds.length === 0 && !status && !filters?.type && !filters?.sort) {
+    if (
+      !keyword &&
+      genreIds.length === 0 &&
+      !status &&
+      !filters?.type &&
+      !filters?.sort
+    ) {
       // Legacy default view (latest updated) when no filters are set.
       url = `${baseUrl}/filter?keyword=&type=Latest+Updated&ep_min=&ep_max=&page=${page}&sort=latest-updated`;
     } else {
