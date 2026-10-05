@@ -27,6 +27,109 @@ const crypto = require("crypto");
 
 const baseUrl = "https://anikototv.to";
 
+// Genre name/alias -> anikototv.to numeric filter id (from /filter form).
+const GENRE_IDS = {
+  Action: 1,
+  "Action & Adventure": 2344,
+  Adventure: 2,
+  Animation: 2345,
+  "Award Winning": 2357,
+  "Boys Love": 2330,
+  Cars: 538,
+  Comedy: 8,
+  Dementia: 453,
+  Demons: 119,
+  Drama: 62,
+  Ecchi: 214,
+  Erotica: 2322,
+  Fantasy: 3,
+  Game: 180,
+  "Girls Love": 2328,
+  Gourmet: 2326,
+  Harem: 215,
+  Historical: 70,
+  Horror: 222,
+  Isekai: 74,
+  Josei: 404,
+  Kids: 46,
+  Magic: 203,
+  "Mahou Shoujo": 2310,
+  "Martial Arts": 114,
+  Mecha: 123,
+  Military: 125,
+  Music: 242,
+  Mystery: 57,
+  Parody: 162,
+  Police: 136,
+  Psychological: 73,
+  Romance: 28,
+  Samurai: 163,
+  School: 14,
+  "Sci-Fi": 12,
+  "Sci-Fi & Fantasy": 2352,
+  Seinen: 50,
+  Shoujo: 252,
+  "Shoujo Ai": 235,
+  Shounen: 15,
+  "Shounen Ai": 233,
+  "Slice of Life": 35,
+  Space: 124,
+  Sports: 29,
+  "Super Power": 16,
+  Supernatural: 9,
+  Suspense: 2316,
+  Thriller: 54,
+  unknown: 32,
+  Vampire: 58,
+};
+
+function resolveGenreIds(genre) {
+  if (genre === undefined || genre === null || genre === "") return [];
+  const list = Array.isArray(genre) ? genre : String(genre).split(",");
+  const ids = [];
+  for (const g of list) {
+    if (typeof g === "number" && Number.isFinite(g)) {
+      ids.push(g);
+      continue;
+    }
+    const s = String(g).trim();
+    if (!s) continue;
+    if (/^\d+$/.test(s)) {
+      ids.push(Number(s));
+      continue;
+    }
+    const found = Object.keys(GENRE_IDS).find(
+      (n) => n.toLowerCase() === s.toLowerCase(),
+    );
+    if (found) ids.push(GENRE_IDS[found]);
+  }
+  return [...new Set(ids)];
+}
+
+const STATUS_SLUGS = {
+  ongoing: "currently-airing",
+  airing: "currently-airing",
+  "currently airing": "currently-airing",
+  completed: "finished-airing",
+  finished: "finished-airing",
+  "finished airing": "finished-airing",
+  upcoming: "not-yet-aired",
+  "not yet aired": "not-yet-aired",
+};
+
+function resolveStatus(status) {
+  if (status === undefined || status === null || status === "") return "";
+  const s = String(status).trim().toLowerCase().replace(/_/g, "-");
+  if (
+    s === "currently-airing" ||
+    s === "finished-airing" ||
+    s === "not-yet-aired"
+  ) {
+    return s;
+  }
+  return STATUS_SLUGS[s] || "";
+}
+
 function parsePagination($, defaultPage) {
   let totalPages = 1;
   $(".pagination a").each((i, el) => {
@@ -114,9 +217,29 @@ async function SearchAnime(query, filters = {}) {
 async function fetchRecentEpisodes(filters = {}) {
   try {
     const page = filters?.page || 1;
-    const { data: html } = await global.axios.get(
-      `${baseUrl}/filter?keyword=&type=Latest+Updated&ep_min=&ep_max=&page=${page}&sort=latest-updated`,
-    );
+    const genreIds = resolveGenreIds(filters?.genre);
+    const status = resolveStatus(filters?.status);
+    const keyword =
+      filters?.keyword !== undefined && filters?.keyword !== null
+        ? String(filters.keyword)
+        : "";
+    let url;
+    if (!keyword && genreIds.length === 0 && !status && !filters?.type && !filters?.sort) {
+      // Legacy default view (latest updated) when no filters are set.
+      url = `${baseUrl}/filter?keyword=&type=Latest+Updated&ep_min=&ep_max=&page=${page}&sort=latest-updated`;
+    } else {
+      const params = new URLSearchParams();
+      if (keyword) params.append("keyword", keyword);
+      for (const gid of genreIds) {
+        params.append("genre[]", String(gid));
+      }
+      if (filters?.type) params.append("type", String(filters.type));
+      if (status) params.append("status[]", status);
+      if (filters?.sort) params.append("sort", String(filters.sort));
+      params.append("page", String(page));
+      url = `${baseUrl}/filter?${params.toString()}`;
+    }
+    const { data: html } = await global.axios.get(url);
     const $ = cheerio.load(html);
     const results = [];
 
@@ -576,7 +699,7 @@ async function fetchEpisodeSources(episodeIdStr, category = null) {
 
 module.exports = {
   name: "anikoto",
-  version: "5.0.3",
+  version: "5.0.4",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,
