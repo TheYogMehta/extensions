@@ -482,22 +482,32 @@ async function AnimeInfo(id) {
           "[AnimePahe] Failed to recover from /anime index:",
           recoveryErr.message,
         );
+      } finally {
         notifyRenderer("info-loading-status", {
           text: "",
         });
       }
 
-      notifyRenderer("info-loading-status", {
-        text: "Updating database with healed mapping, please wait...",
-      });
-
-      return {
-        needsMappingSync: true,
-        brokenUuid: id,
-        newUuid: resolvedNewUuid || null,
-        dataId: resolvedNewUuid || id,
-        version: resolvedVersion || null,
-      };
+      if (resolvedNewUuid) {
+        notifyRenderer("info-loading-status", {
+          text: "Updating database with healed mapping, please wait...",
+        });
+        return {
+          needsMappingSync: true,
+          brokenUuid: id,
+          newUuid: resolvedNewUuid,
+          dataId: resolvedNewUuid,
+          version: resolvedVersion || null,
+        };
+      } else {
+        return {
+          needsMappingSync: false,
+          brokenUuid: id,
+          newUuid: null,
+          dataId: id,
+          version: null,
+        };
+      }
     }
 
     console.error("Error fetching data from AnimePahe:", error);
