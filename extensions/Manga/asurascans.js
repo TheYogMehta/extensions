@@ -21,8 +21,9 @@ async function latestManga(page = 1) {
     const $ = cheerio.load(data);
     const results = [];
 
-    $("a[href*='/comics/']").each((_, el) => {
-      const href = $(el).attr("href");
+    $(".series-card").each((_, el) => {
+      const a = $(el).find("a[href*='/comics/']").first();
+      const href = a.attr("href") || $(el).attr("href");
       if (!href) return;
 
       const parts = href.split("/comics/");
@@ -32,9 +33,8 @@ async function latestManga(page = 1) {
 
       const imgEl = $(el).find("img");
       const image = imgEl.attr("src") || imgEl.attr("data-src") || null;
-      let title = $(el).text().trim();
-
-      // Clean rating numbers or extra text from title if present
+      let title =
+        $(el).find("h3").first().text().trim() || imgEl.attr("alt") || "";
       title = title.replace(/^[\d.]+\s*/, "").trim();
 
       if (title && image && !results.some((r) => r.id === id)) {
@@ -45,6 +45,31 @@ async function latestManga(page = 1) {
         });
       }
     });
+
+    if (results.length === 0) {
+      $("a[href*='/comics/']").each((_, el) => {
+        const href = $(el).attr("href");
+        if (!href) return;
+
+        const parts = href.split("/comics/");
+        if (parts.length < 2) return;
+        const id = parts[1].split("/")[0].split("?")[0];
+        if (!id) return;
+
+        const imgEl = $(el).find("img");
+        const image = imgEl.attr("src") || imgEl.attr("data-src") || null;
+        let title = $(el).text().trim() || imgEl.attr("alt") || "";
+        title = title.replace(/^[\d.]+\s*/, "").trim();
+
+        if (title && image && !results.some((r) => r.id === id)) {
+          results.push({
+            id: id,
+            title: title,
+            image: image,
+          });
+        }
+      });
+    }
 
     let totalPages = null;
     const bodyText = $("body").text();
@@ -69,14 +94,17 @@ async function latestManga(page = 1) {
 
 async function searchManga(query, page = 1) {
   try {
+    if (!query) return latestManga(page);
+
     const { data } = await global.axios.get(
-      `${baseUrl}/comics?name=${encodeURIComponent(query)}`,
+      `${baseUrl}/browse?q=${encodeURIComponent(query)}&page=${page}`,
     );
     const $ = cheerio.load(data);
     const results = [];
 
-    $("a[href*='/comics/']").each((_, el) => {
-      const href = $(el).attr("href");
+    $(".series-card").each((_, el) => {
+      const a = $(el).find("a[href*='/comics/']").first();
+      const href = a.attr("href") || $(el).attr("href");
       if (!href) return;
 
       const parts = href.split("/comics/");
@@ -86,11 +114,9 @@ async function searchManga(query, page = 1) {
 
       const imgEl = $(el).find("img");
       const image = imgEl.attr("src") || imgEl.attr("data-src") || null;
-      let title = $(el)
-        .text()
-        .trim()
-        .replace(/^[\d.]+\s*/, "")
-        .trim();
+      let title =
+        $(el).find("h3").first().text().trim() || imgEl.attr("alt") || "";
+      title = title.replace(/^[\d.]+\s*/, "").trim();
 
       const qLower = (query || "").toLowerCase();
       if (
@@ -106,6 +132,37 @@ async function searchManga(query, page = 1) {
         });
       }
     });
+
+    if (results.length === 0) {
+      $("a[href*='/comics/']").each((_, el) => {
+        const href = $(el).attr("href");
+        if (!href) return;
+
+        const parts = href.split("/comics/");
+        if (parts.length < 2) return;
+        const id = parts[1].split("/")[0].split("?")[0];
+        if (!id) return;
+
+        const imgEl = $(el).find("img");
+        const image = imgEl.attr("src") || imgEl.attr("data-src") || null;
+        let title = $(el).text().trim() || imgEl.attr("alt") || "";
+        title = title.replace(/^[\d.]+\s*/, "").trim();
+
+        const qLower = (query || "").toLowerCase();
+        if (
+          title &&
+          image &&
+          (!qLower || title.toLowerCase().includes(qLower)) &&
+          !results.some((r) => r.id === id)
+        ) {
+          results.push({
+            id: id,
+            title: title,
+            image: image,
+          });
+        }
+      });
+    }
 
     return {
       current_page: page,
@@ -244,7 +301,7 @@ async function fetchChapterPages(chapterId) {
 
 module.exports = {
   name: "asurascans",
-  version: "1.0.1",
+  version: "1.0.2",
   latestManga,
   searchManga,
   fetchMangaInfo,
