@@ -954,7 +954,7 @@ function extractQualityNumber(qualityString) {
 }
 
 // helpers for extracting video links
-async function extract(videoUrl, retries = 2, delay = 1000) {
+async function extract(videoUrl, retries = 3, delay = 1000) {
   let sources = [];
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
@@ -974,12 +974,9 @@ async function extract(videoUrl, retries = 2, delay = 1000) {
       });
       return sources;
     } catch (err) {
-      if (
-        (err.response?.status === 429 || err.message.includes("429")) &&
-        attempt < retries
-      ) {
+      if (attempt < retries) {
         console.warn(
-          `Request to ${videoUrl.href} returned 429. Retrying in ${delay}ms (attempt ${attempt}/${retries})...`,
+          `Resolving ${videoUrl.href} failed (${err.response?.status || err.message}). Retrying in ${delay}ms (attempt ${attempt}/${retries})...`,
         );
         await new Promise((resolve) => setTimeout(resolve, delay));
         delay *= 2;
