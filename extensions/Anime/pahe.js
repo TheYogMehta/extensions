@@ -41,6 +41,23 @@ const baseUrls = [
 ];
 let baseUrl = baseUrls[0];
 
+// Hosts that recently failed are tried last for a while, so one dead
+// mirror can't stall every call (5 attempts x 6 mirrors otherwise).
+const mirrorCooldownUntil = {};
+const MIRROR_COOLDOWN_MS = 5 * 60 * 1000;
+
+function markMirrorDown(base) {
+  try {
+    mirrorCooldownUntil[String(base)] = Date.now() + MIRROR_COOLDOWN_MS;
+  } catch (_) {}
+}
+
+function markMirrorOk(base) {
+  try {
+    delete mirrorCooldownUntil[String(base)];
+  } catch (_) {}
+}
+
 function swapBase(url, base) {
   return String(url).replace(/https:\/\/animepahe\.[a-z]+/i, base);
 }
@@ -69,7 +86,17 @@ function getBaseVariants(url) {
       out.push(v);
     }
   }
-  return out;
+  const now = Date.now();
+  const fresh = [];
+  const cooling = [];
+  for (const v of out) {
+    const host = (/https:\/\/animepahe\.[a-z]+/i.exec(v) || [])[0] || v;
+    (mirrorCooldownUntil[host] && mirrorCooldownUntil[host] > now
+      ? cooling
+      : fresh
+    ).push(v);
+  }
+  return [...fresh, ...cooling];
 }
 
 function notifyRenderer(channel, payload) {
@@ -447,6 +474,7 @@ async function safeGet(url, config = {}, maxRetries = 5, opts = {}) {
             console.warn(
               `[AnimePahe] ${tryBase} returned non-API payload, trying next mirror...`,
             );
+            markMirrorDown(tryBase);
             lastErr = Object.assign(
               new Error(`Invalid API response from ${tryBase}`),
               { code: "BAD_MIRROR" },
@@ -497,6 +525,7 @@ async function safeGet(url, config = {}, maxRetries = 5, opts = {}) {
 
         // success -> remember working base
         baseUrl = tryBase;
+        markMirrorOk(tryBase);
         notifyRenderer("catalog-loading-status", {
           text: "",
         });
@@ -507,6 +536,7 @@ async function safeGet(url, config = {}, maxRetries = 5, opts = {}) {
         if (status === 404) {
           // Try remaining mirrors before surfacing 404 (preserves the
           // UUID auto-heal flow when every mirror agrees it is missing).
+          markMirrorDown(tryBase);
           console.warn(`[AnimePahe] 404 on ${tryBase}, trying next mirror...`);
           continue;
         }
@@ -521,6 +551,7 @@ async function safeGet(url, config = {}, maxRetries = 5, opts = {}) {
             "ETIMEDOUT",
             "ECONNREFUSED",
           ].some((c) => String(err?.code || err?.message || "").includes(c));
+        markMirrorDown(tryBase);
         if (isDomainError) {
           console.warn(
             `[AnimePahe] ${status || "Network"} on ${tryBase}, trying next mirror...`,
@@ -989,7 +1020,7 @@ async function extract(videoUrl, retries = 3, delay = 1000) {
 
 module.exports = {
   name: "pahe",
-  version: "5.0.6",
+  version: "5.0.7",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,
