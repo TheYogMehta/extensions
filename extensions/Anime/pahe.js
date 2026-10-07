@@ -26,23 +26,18 @@
 const cheerio = require("cheerio");
 
 // variables
-// Mirror priority: hosts that may serve the real API behind Cloudflare
-// (403 to bots, solvable via in-app CF bypass) come BEFORE known
-// WordPress clones (.ng/.ch return 200 + HTML with no API).
-// safeGet validates response SHAPE, so dead/clone mirrors are skipped
-// automatically instead of silently poisoning results.
+// Mirror pool: .pw is the proven API host and stays first; .ng/.ch are
+// reachable fallbacks. safeGet validates response SHAPE, so dead/clone
+// mirrors are skipped automatically instead of silently poisoning results.
 const baseUrls = [
   "https://animepahe.pw",
-  "https://animepahe.com",
-  "https://animepahe.org",
-  "https://animepahe.io",
   "https://animepahe.ng",
   "https://animepahe.ch",
 ];
 let baseUrl = baseUrls[0];
 
 // Hosts that recently failed are tried last for a while, so one dead
-// mirror can't stall every call (5 attempts x 6 mirrors otherwise).
+// mirror can't stall every call.
 const mirrorCooldownUntil = {};
 const MIRROR_COOLDOWN_MS = 5 * 60 * 1000;
 
@@ -184,9 +179,6 @@ async function syncPaheDirectory(brokenUuid = null) {
     if (!html) {
       const mirrors = [
         "https://animepahe.pw",
-        "https://animepahe.org",
-        "https://animepahe.com",
-        "https://animepahe.io",
         "https://animepahe.ng",
         "https://animepahe.ch",
       ];
@@ -1024,7 +1016,7 @@ async function extract(videoUrl, retries = 3, delay = 1000) {
 
 module.exports = {
   name: "pahe",
-  version: "5.0.7",
+  version: "5.0.8",
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,
