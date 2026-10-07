@@ -417,6 +417,10 @@ async function safeGet(url, config = {}, maxRetries = 5, opts = {}) {
   const expectJson = !!opts.expectJson;
   let lastErr = null;
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const u = new URL(url);
+      console.log(`[AnimePahe] GET ${u.hostname}${u.pathname} (attempt ${attempt}/${maxRetries})`);
+    } catch (_) {}
     const now = Date.now();
     const timeSinceLast = now - lastRequestTime;
     if (timeSinceLast < MIN_REQUEST_INTERVAL) {
