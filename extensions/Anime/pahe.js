@@ -35,9 +35,6 @@ const baseUrls = [
   "https://animepahe.pw",
   "https://animepahe.com",
   "https://animepahe.org",
-  "https://animepahe.io",
-  "https://animepahe.ng",
-  "https://animepahe.ch",
 ];
 let baseUrl = baseUrls[0];
 
@@ -159,9 +156,6 @@ async function syncPaheDirectory(brokenUuid = null) {
         "https://animepahe.pw",
         "https://animepahe.org",
         "https://animepahe.com",
-        "https://animepahe.io",
-        "https://animepahe.ng",
-        "https://animepahe.ch",
       ];
       for (const m of mirrors) {
         if (m === baseUrl) continue;
@@ -177,7 +171,7 @@ async function syncPaheDirectory(brokenUuid = null) {
             );
             html = typeof res?.data === "string" ? res.data : "";
           }
-          if (html && (html.includes("/anime/") || html.includes("animepahe")))
+          if (html && html.includes("/anime/"))
             break;
         } catch (_) {}
       }
@@ -713,8 +707,48 @@ async function AnimeInfo(id) {
 
     if (is404 && id) {
       console.warn(
-        `[AnimePahe] UUID ${id} returned 404. Fetching /anime directory to auto-heal UUID...`,
+        `[AnimePahe] UUID ${id} returned 404. Checking canary and directory to auto-heal UUID...`,
       );
+
+      // Fast check: if this broken UUID belongs to One Piece and we already have a newer canary UUID
+      const savedOpUuid = await getSavedOnePieceUuid();
+      if (
+        savedOpUuid &&
+        String(id).toLowerCase() !== savedOpUuid.toLowerCase()
+      ) {
+        let isOnePiece = false;
+        if (global.mappingDb) {
+          try {
+            const check = await global.mappingDb
+              .prepare("SELECT malid, id FROM pahe WHERE uuid = ? OR id = ? LIMIT 1")
+              .get(id, id);
+            if (check?.malid === 21 || check?.id === "4") isOnePiece = true;
+          } catch (_) {}
+        }
+        if (global.db && !isOnePiece) {
+          try {
+            const animeCheck = await global.db
+              .prepare("SELECT MalID, title FROM Anime WHERE id = ? OR id LIKE ? LIMIT 1")
+              .get(id, `${id}-%`);
+            if (animeCheck?.MalID === "21" || /^one piece$/i.test(animeCheck?.title || "")) {
+              isOnePiece = true;
+            }
+          } catch (_) {}
+        }
+        if (isOnePiece) {
+          console.log(
+            `[AnimePahe] Auto-healing broken One Piece UUID ${id} -> ${savedOpUuid} via saved canary UUID`,
+          );
+          return {
+            needsMappingSync: true,
+            brokenUuid: id,
+            newUuid: savedOpUuid,
+            dataId: savedOpUuid,
+            version: null,
+          };
+        }
+      }
+
       notifyRenderer("info-loading-status", {
         text: "Auto-healing AnimePahe UUID from directory, please wait...",
       });
