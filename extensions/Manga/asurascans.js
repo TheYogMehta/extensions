@@ -301,7 +301,15 @@ async function fetchChapterPages(chapterId) {
 
 module.exports = {
   name: "asurascans",
-  version: "1.0.2",
+  version: "2.0.0",
+  baseUrl,
+  headerRules: [
+    {
+      match: ["asurascans", "asura-images", "asuracomic"],
+      headers: { Referer: "https://asurascans.com/" },
+    },
+  ],
+  bypassDomains: ["asurascans", "asuracomic"],
   latestManga,
   searchManga,
   fetchMangaInfo,

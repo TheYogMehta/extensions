@@ -262,7 +262,15 @@ async function fetchChapterPages(chapterId) {
 
 module.exports = {
   name: "weebcentral",
-  version: "2.0.1",
+  version: "3.0.0",
+  baseUrl,
+  headerRules: [
+    {
+      match: ["weebcentral", "temp.compsci88.com", "lastation.us"],
+      headers: { Referer: "https://weebcentral.com/" },
+    },
+  ],
+  bypassDomains: ["weebcentral"],
   latestManga,
   searchManga,
   fetchMangaInfo,

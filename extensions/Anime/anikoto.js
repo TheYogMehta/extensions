@@ -529,8 +529,18 @@ async function processServer(server) {
       if (m3u8Url) {
         try {
           const cdnDomain = new URL(m3u8Url).hostname;
-          global.setDynamicReferer(cdnDomain, playerReferer);
-          global.setFallbackReferer(playerReferer);
+          if (typeof global.registerSubrequestHeaders === "function") {
+            global.registerSubrequestHeaders(cdnDomain, {
+              Referer: playerReferer,
+            });
+            global.registerSubrequestHeaders(new URL(iframeUrl).hostname, {
+              Referer: playerReferer,
+            });
+          }
+          if (typeof global.setDynamicReferer === "function") {
+            global.setDynamicReferer(cdnDomain, playerReferer);
+            global.setFallbackReferer(playerReferer);
+          }
         } catch (e) {}
 
         const subtitles = (sourcesRes.data.tracks || [])
@@ -705,7 +715,29 @@ async function fetchEpisodeSources(episodeIdStr, category = null) {
 
 module.exports = {
   name: "anikoto",
-  version: "5.0.4",
+  version: "6.0.0",
+  baseUrl,
+  headerRules: [
+    {
+      match: ["anikoto", "anikototv"],
+      headers: { Referer: "https://anikototv.to/" },
+    },
+  ],
+  subrequestHeaders: [
+    {
+      match: ["megaplay", "imgnex.top", "bcdn"],
+      headers: { Referer: "https://megaplay.buzz/" },
+    },
+  ],
+  bypassDomains: [
+    "anikoto",
+    "anikototv",
+    "megaplay",
+    "vidplay",
+    "vidstream",
+    "vidtub",
+    "megap.",
+  ],
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,

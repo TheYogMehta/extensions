@@ -545,6 +545,11 @@ async function processEmbedServer(server) {
       try {
         const cdnDomain = new URL(m3u8Url).hostname;
         const embedDomain = new URL(embedUrl).origin + "/";
+        if (typeof global.registerSubrequestHeaders === "function") {
+          global.registerSubrequestHeaders(cdnDomain, {
+            Referer: embedDomain,
+          });
+        }
         if (global.setDynamicReferer) {
           global.setDynamicReferer(cdnDomain, embedDomain);
           global.setFallbackReferer(embedDomain);
@@ -552,8 +557,15 @@ async function processEmbedServer(server) {
         for (const sub of subtitles) {
           try {
             const subDomain = new URL(sub.url).hostname;
-            if (subDomain !== cdnDomain && global.setDynamicReferer) {
-              global.setDynamicReferer(subDomain, embedDomain);
+            if (subDomain !== cdnDomain) {
+              if (typeof global.registerSubrequestHeaders === "function") {
+                global.registerSubrequestHeaders(subDomain, {
+                  Referer: embedDomain,
+                });
+              }
+              if (global.setDynamicReferer) {
+                global.setDynamicReferer(subDomain, embedDomain);
+              }
             }
           } catch (_) {}
         }
@@ -588,6 +600,11 @@ async function processEmbedServer(server) {
       try {
         const cdnDomain = new URL(mp4Url).hostname;
         const embedDomain = new URL(embedUrl).origin + "/";
+        if (typeof global.registerSubrequestHeaders === "function") {
+          global.registerSubrequestHeaders(cdnDomain, {
+            Referer: embedDomain,
+          });
+        }
         if (global.setDynamicReferer) {
           global.setDynamicReferer(cdnDomain, embedDomain);
           global.setFallbackReferer(embedDomain);
@@ -595,8 +612,15 @@ async function processEmbedServer(server) {
         for (const sub of subtitles) {
           try {
             const subDomain = new URL(sub.url).hostname;
-            if (subDomain !== cdnDomain && global.setDynamicReferer) {
-              global.setDynamicReferer(subDomain, embedDomain);
+            if (subDomain !== cdnDomain) {
+              if (typeof global.registerSubrequestHeaders === "function") {
+                global.registerSubrequestHeaders(subDomain, {
+                  Referer: embedDomain,
+                });
+              }
+              if (global.setDynamicReferer) {
+                global.setDynamicReferer(subDomain, embedDomain);
+              }
             }
           } catch (_) {}
         }
@@ -623,7 +647,15 @@ async function processEmbedServer(server) {
 
 module.exports = {
   name: "anineko",
-  version: "3.0.4",
+  version: "4.0.0",
+  baseUrl,
+  headerRules: [
+    {
+      match: ["anineko"],
+      headers: { Referer: "https://anineko.to/" },
+    },
+  ],
+  bypassDomains: ["anineko"],
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,

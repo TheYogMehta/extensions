@@ -26,9 +26,12 @@ async function latestManga(page = 1) {
     let items = [];
 
     for (const k of Object.keys(parsed.queries || {})) {
-      if (k.includes('"manga"') && (k.includes('"list"') || k.includes('"top"'))) {
+      if (
+        k.includes('"manga"') &&
+        (k.includes('"list"') || k.includes('"top"'))
+      ) {
         const q = parsed.queries[k];
-        const list = Array.isArray(q) ? q : (q.items || q.data || []);
+        const list = Array.isArray(q) ? q : q.items || q.data || [];
         if (Array.isArray(list) && list.length > 0) {
           items = list;
           break;
@@ -239,7 +242,15 @@ async function fetchChapterPages(chapterId) {
 
 module.exports = {
   name: "comix",
-  version: "1.0.0",
+  version: "2.0.0",
+  baseUrl,
+  headerRules: [
+    {
+      match: ["comix"],
+      strip: ["Referer", "referer", "Origin", "origin"],
+    },
+  ],
+  bypassDomains: ["comix"],
   latestManga,
   searchManga,
   fetchMangaInfo,

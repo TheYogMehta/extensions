@@ -2,47 +2,47 @@
   "Anime": [
     {
       "name": "anikoto",
-      "version": "5.0.4",
-      "MinAppVersion": "10.0.0",
+      "version": "6.0.4",
+      "MinAppVersion": "11.0.0",
       "disabled": false
     },
     {
       "name": "pahe",
-      "version": "5.0.6",
-      "MinAppVersion": "10.0.0",
+      "version": "6.0.0",
+      "MinAppVersion": "11.0.0",
       "disabled": false
     },
     {
       "name": "anineko",
-      "version": "3.0.4",
-      "MinAppVersion": "9.5.3",
+      "version": "4.0.0",
+      "MinAppVersion": "11.0.0",
       "disabled": true
     }
   ],
   "Manga": [
     {
       "name": "weebcentral",
-      "version": "2.0.1",
-      "MinAppVersion": "7.0.0",
+      "version": "3.0.0",
+      "MinAppVersion": "11.0.0",
       "disabled": false
     },
 
     {
       "name": "asurascans",
-      "version": "1.0.2",
-      "MinAppVersion": "9.0.0",
+      "version": "2.0.0",
+      "MinAppVersion": "11.0.0",
       "disabled": false
     },
     {
       "name": "comix",
-      "version": "1.0.0",
-      "MinAppVersion": "9.0.0",
+      "version": "2.0.0",
+      "MinAppVersion": "11.0.0",
       "disabled": false
     },
     {
       "name": "mangafire",
-      "version": "1.0.1",
-      "MinAppVersion": "9.0.0",
+      "version": "2.0.0",
+      "MinAppVersion": "11.0.0",
       "disabled": false
     }
   ]

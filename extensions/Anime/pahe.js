@@ -122,17 +122,21 @@ async function getSavedOnePieceUuid() {
   return null;
 }
 
-async function syncPaheDirectory(brokenUuid = null) {
+async function syncPaheDirectory(
+  brokenUuid = null,
+  cachedHtml = null,
+  forceSync = false,
+) {
   if (isDirectorySyncRunning) return null;
   isDirectorySyncRunning = true;
   lastDirectorySyncTime = Date.now();
 
   try {
-    console.log("[AnimePahe] Starting 1h background /anime directory sync...");
+    console.log("[AnimePahe] Starting /anime directory sync...");
 
-    let html = "";
+    let html = cachedHtml || "";
     // 1. Try in-app browser session first if Cloudflare clearance is available
-    if (typeof global.scrapperFetch === "function") {
+    if (!html && typeof global.scrapperFetch === "function") {
       try {
         html = await global.scrapperFetch(`${baseUrl}/anime`);
       } catch (_) {}
@@ -171,8 +175,7 @@ async function syncPaheDirectory(brokenUuid = null) {
             );
             html = typeof res?.data === "string" ? res.data : "";
           }
-          if (html && html.includes("/anime/"))
-            break;
+          if (html && html.includes("/anime/")) break;
         } catch (_) {}
       }
     }
@@ -242,8 +245,9 @@ async function syncPaheDirectory(brokenUuid = null) {
       `[AnimePahe] Canary One Piece UUID check - Current: ${currentOpUuid || "not found"}, Saved: ${savedOpUuid || "none"}`,
     );
 
-    // If One Piece UUID hasn't changed and no brokenUuid requested, skip server sync!
+    // If One Piece UUID hasn't changed and no brokenUuid requested and not forced, skip server sync!
     if (
+      !forceSync &&
       savedOpUuid &&
       currentOpUuid &&
       savedOpUuid.toLowerCase() === currentOpUuid.toLowerCase() &&
@@ -261,13 +265,14 @@ async function syncPaheDirectory(brokenUuid = null) {
     }
 
     console.log(
-      `[AnimePahe] UUID rotation detected or initial sync (current OP: ${currentOpUuid}, saved OP: ${savedOpUuid}). Posting catalog to mapping server...`,
+      `[AnimePahe] UUID rotation detected or initial sync (current OP: ${currentOpUuid}, saved OP: ${savedOpUuid}, force: ${forceSync}). Posting catalog to mapping server...`,
     );
 
     // 5. Post to mapping index server so all entries are mapped to MAL IDs
     const client = global.axios || require("axios");
     const syncEndpoints = [
       "https://strawverse.theyogmehta.online/api/pahe/index",
+      "http://localhost:9843/api/pahe/index",
       "http://localhost:33544/api/pahe/index",
     ];
 
@@ -356,31 +361,7 @@ async function syncPaheDirectory(brokenUuid = null) {
   }
 }
 
-async function triggerHourlyDirectorySync() {
-  const now = Date.now();
-  if (isDirectorySyncRunning) return;
-  if (now - lastDirectorySyncTime < DIRECTORY_SYNC_INTERVAL) return;
-
-  if (lastDirectorySyncTime === 0) {
-    try {
-      const savedTime = await getSavedSetting("pahe_directory_sync_time");
-      if (savedTime && now - Number(savedTime) < DIRECTORY_SYNC_INTERVAL) {
-        lastDirectorySyncTime = Number(savedTime);
-        return;
-      }
-    } catch (_) {}
-  }
-
-  lastDirectorySyncTime = now;
-  setTimeout(() => {
-    syncPaheDirectory().catch(() => {});
-  }, 200);
-}
-
 async function safeGet(url, config = {}, maxRetries = 5, opts = {}) {
-  if (!config.skipDirectorySync) {
-    triggerHourlyDirectorySync();
-  }
   const expectJson = !!opts.expectJson;
   let lastErr = null;
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -504,29 +485,25 @@ async function safeGet(url, config = {}, maxRetries = 5, opts = {}) {
           console.warn(`[AnimePahe] 404 on ${tryBase}, trying next mirror...`);
           continue;
         }
-        // try next mirror on 403 / network errors without waiting
-        const isDomainError =
-          status === 403 ||
-          !status ||
-          [
-            "ENOTFOUND",
-            "EAI_AGAIN",
-            "ECONNRESET",
-            "ETIMEDOUT",
-            "ECONNREFUSED",
-          ].some((c) => String(err?.code || err?.message || "").includes(c));
-        if (isDomainError) {
+        // Only switch mirrors if the host is unreachable / down, NOT on 403 Cloudflare challenge!
+        const isMirrorDown =
+          status === 502 ||
+          status === 504 ||
+          (!status &&
+            [
+              "ENOTFOUND",
+              "EAI_AGAIN",
+              "ECONNRESET",
+              "ETIMEDOUT",
+              "ECONNREFUSED",
+            ].some((c) => String(err?.code || err?.message || "").includes(c)));
+        if (isMirrorDown) {
           console.warn(
-            `[AnimePahe] ${status || "Network"} on ${tryBase}, trying next mirror...`,
+            `[AnimePahe] Mirror ${tryBase} is down (${err?.code || status || "Network"}), trying next mirror...`,
           );
-          try {
-            if (global.cloudflarebypass && status === 403) {
-              await global.cloudflarebypass(tryUrl, false, tryBase + "/");
-            }
-          } catch (_) {}
           continue; // next variant
         }
-        break; // non-domain error -> outer retry with backoff
+        break; // 403 or other response -> stay on current mirror
       }
     }
     if (attempt < maxRetries) {
@@ -584,29 +561,200 @@ async function SearchAnime(query, filters = {}) {
   return res;
 }
 
+function parseRecentEpisodesFromHtml(html) {
+  if (!html || typeof html !== "string") return [];
+  try {
+    const $ = (0, cheerio.load)(html);
+    const results = [];
+    $(".episode-wrap").each((_, el) => {
+      const $el = $(el);
+      const playHref = $el.find("a.play").attr("href") || "";
+      const animeHref = $el.find(".episode-title a").attr("href") || "";
+      const match =
+        animeHref.match(/\/anime\/([0-9a-f-]{36})/i) ||
+        playHref.match(/\/play\/([0-9a-f-]{36})/i);
+      const uuid = match ? match[1] : "";
+      const title =
+        $el.find(".episode-title a").attr("title") ||
+        $el.find(".episode-title a").text().trim();
+      const $img = $el.find(".episode-snapshot img");
+      const image =
+        $img.attr("data-src") ||
+        $img.attr("src") ||
+        $img.attr("data-original") ||
+        "";
+      const epWrap = $el.find(".episode-number").clone();
+      epWrap.find(".text-hide").remove();
+      const epNum = parseFloat(epWrap.text().trim()) || 1;
+      if (uuid && title) {
+        results.push({
+          id: uuid,
+          title,
+          image,
+          episode: epNum,
+        });
+      }
+    });
+    return results;
+  } catch (_) {
+    return [];
+  }
+}
+
+async function resolvePosterImage(uuid, title, fallbackImage) {
+  try {
+    if (global.mappingDb) {
+      const row = await global.mappingDb
+        .prepare("SELECT malid FROM pahe WHERE uuid = ? OR id = ? LIMIT 1")
+        .get(uuid, uuid);
+      let malid = row?.malid;
+      if (
+        !malid &&
+        (uuid === "858fa643-262f-5c07-d80f-28dece13d592" ||
+          (title && title.toLowerCase() === "one piece"))
+      ) {
+        malid = 21;
+      }
+      if (malid) {
+        const aRow = await global.mappingDb
+          .prepare("SELECT image_url FROM anime WHERE malid = ? LIMIT 1")
+          .get(malid);
+        if (aRow?.image_url) {
+          return { image: aRow.image_url, malid };
+        }
+      }
+    }
+  } catch (_) {}
+
+  try {
+    if (global.db) {
+      const aRow = await global.db
+        .prepare(
+          "SELECT MalID, image_url FROM Anime WHERE id = ? OR LOWER(TRIM(title)) = ? LIMIT 1",
+        )
+        .get(uuid, (title || "").toLowerCase().trim());
+      if (aRow?.image_url) {
+        return {
+          image: aRow.image_url,
+          malid: aRow.MalID ? Number(aRow.MalID) : null,
+        };
+      }
+      const mRow = await global.db
+        .prepare(
+          "SELECT id, image FROM MyAnimeList WHERE id = ? OR LOWER(TRIM(title)) = ? LIMIT 1",
+        )
+        .get(uuid, (title || "").toLowerCase().trim());
+      if (mRow?.image) {
+        return {
+          image: mRow.image,
+          malid: mRow.id ? Number(mRow.id) : null,
+        };
+      }
+    }
+  } catch (_) {}
+
+  return { image: fallbackImage, malid: null };
+}
+
 // Recent Episodes
 async function fetchRecentEpisodes(filters = {}) {
   const pageNum = filters.page || 1;
-  const { data } = await safeGet(
-    `${baseUrl}/api?m=airing&page=${pageNum}`,
-    {
-      headers: {
-        Referer: baseUrl,
+
+  if (pageNum === 1) {
+    let html = "";
+    if (typeof global.scrapperFetch === "function") {
+      try {
+        html = await global.scrapperFetch(`${baseUrl}/`);
+      } catch (_) {}
+    }
+    if (!html) {
+      try {
+        const baseRes = await safeGet(
+          `${baseUrl}/`,
+          {
+            headers: {
+              Cookie: "",
+              Referer: `${baseUrl}/`,
+            },
+            skipCookie: true,
+          },
+          1,
+        );
+        html = typeof baseRes?.data === "string" ? baseRes.data : "";
+      } catch (_) {}
+    }
+
+    if (html) {
+      const parsed = parseRecentEpisodesFromHtml(html);
+      if (parsed.length > 0) {
+        console.log(
+          `[AnimePahe] Successfully parsed ${parsed.length} latest releases from base URL homepage`,
+        );
+        const enrichedParsed = await Promise.all(
+          parsed.map(async (item) => {
+            const { image, malid } = await resolvePosterImage(
+              item.id,
+              item.title,
+              item.image,
+            );
+            return {
+              ...item,
+              image: image || item.image,
+              snapshot: item.image,
+              malid,
+            };
+          }),
+        );
+        return {
+          currentPage: 1,
+          hasNextPage: true,
+          totalPages: 100,
+          results: enrichedParsed,
+        };
+      }
+    }
+  }
+
+  let data = null;
+  try {
+    const apiRes = await safeGet(
+      `${baseUrl}/api?m=airing&page=${pageNum}`,
+      {
+        headers: {
+          Referer: baseUrl + "/",
+        },
       },
-    },
-    5,
-    { expectJson: true },
+      2,
+      { expectJson: true },
+    );
+    data = apiRes?.data;
+  } catch (err) {
+    console.warn(`[AnimePahe] /api?m=airing failed (${err.message})`);
+  }
+
+  const enrichedResults = await Promise.all(
+    (data?.data || []).map(async (item) => {
+      const { image, malid } = await resolvePosterImage(
+        item.anime_session,
+        item.anime_title,
+        item?.snapshot,
+      );
+      return {
+        id: `${item.anime_session}`,
+        title: item.anime_title,
+        image: image || item?.snapshot,
+        snapshot: item?.snapshot,
+        episode: item.episode,
+        malid,
+      };
+    }),
   );
+
   const res = {
     currentPage: pageNum,
     hasNextPage: data?.next_page_url?.length > 0 ? true : false,
     totalPages: data?.last_page ?? 0,
-    results: (data?.data || []).map((item) => ({
-      id: `${item.anime_session}`,
-      title: item.anime_title,
-      image: item?.snapshot,
-      episode: item.episode,
-    })),
+    results: enrichedResults,
   };
   return res;
 }
@@ -720,7 +868,9 @@ async function AnimeInfo(id) {
         if (global.mappingDb) {
           try {
             const check = await global.mappingDb
-              .prepare("SELECT malid, id FROM pahe WHERE uuid = ? OR id = ? LIMIT 1")
+              .prepare(
+                "SELECT malid, id FROM pahe WHERE uuid = ? OR id = ? LIMIT 1",
+              )
               .get(id, id);
             if (check?.malid === 21 || check?.id === "4") isOnePiece = true;
           } catch (_) {}
@@ -728,9 +878,14 @@ async function AnimeInfo(id) {
         if (global.db && !isOnePiece) {
           try {
             const animeCheck = await global.db
-              .prepare("SELECT MalID, title FROM Anime WHERE id = ? OR id LIKE ? LIMIT 1")
+              .prepare(
+                "SELECT MalID, title FROM Anime WHERE id = ? OR id LIKE ? LIMIT 1",
+              )
               .get(id, `${id}-%`);
-            if (animeCheck?.MalID === "21" || /^one piece$/i.test(animeCheck?.title || "")) {
+            if (
+              animeCheck?.MalID === "21" ||
+              /^one piece$/i.test(animeCheck?.title || "")
+            ) {
               isOnePiece = true;
             }
           } catch (_) {}
@@ -960,6 +1115,11 @@ async function processServer(server) {
       const streamUrl = res[0].url;
       try {
         const streamDomain = new URL(streamUrl).hostname;
+        if (typeof global.registerSubrequestHeaders === "function") {
+          global.registerSubrequestHeaders(streamDomain, {
+            Referer: playerReferer,
+          });
+        }
         if (global.setDynamicReferer) {
           global.setDynamicReferer(streamDomain, playerReferer);
           global.setFallbackReferer(playerReferer);
@@ -1024,9 +1184,238 @@ async function extract(videoUrl, retries = 2, delay = 1000) {
   }
 }
 
+function isPageLoaded(title, html) {
+  if (!html || typeof html !== "string") return false;
+  const lower = html.toLowerCase();
+  return (
+    lower.includes("latest releases") ||
+    lower.includes("beware of fake websites") ||
+    lower.includes("episode-wrap") ||
+    (lower.includes("/anime/") && lower.includes("navbar-brand")) ||
+    lower.includes('class="anime-summary"') ||
+    lower.includes('class="the-content"')
+  );
+}
+
+async function healId({ oldId, malid, title, folderName }) {
+  if (!oldId) return null;
+  const cleanOldId = String(oldId).trim();
+
+  let resolvedMalId = malid ? Number(malid) : null;
+  if (!resolvedMalId && global.mappingDb) {
+    try {
+      const row = await global.mappingDb
+        .prepare("SELECT malid FROM pahe WHERE uuid = ? OR id = ? LIMIT 1")
+        .get(cleanOldId, cleanOldId);
+      if (row?.malid) resolvedMalId = Number(row.malid);
+    } catch (_) {}
+  }
+
+  if (global.mappingDb) {
+    try {
+      let mappingRow = null;
+      if (resolvedMalId) {
+        mappingRow = await global.mappingDb
+          .prepare("SELECT uuid FROM pahe WHERE malid = ? LIMIT 1")
+          .get(resolvedMalId);
+      } else {
+        mappingRow = await global.mappingDb
+          .prepare("SELECT uuid FROM pahe WHERE id = ? OR uuid = ? LIMIT 1")
+          .get(cleanOldId, cleanOldId);
+      }
+      if (
+        mappingRow?.uuid &&
+        mappingRow.uuid.toLowerCase() !== cleanOldId.toLowerCase()
+      ) {
+        return mappingRow.uuid;
+      }
+    } catch (_) {}
+  }
+
+  if (
+    resolvedMalId === 21 ||
+    (title && /^one piece$/i.test(String(title).trim()))
+  ) {
+    const savedOpUuid = await getSavedOnePieceUuid();
+    if (savedOpUuid && savedOpUuid.toLowerCase() !== cleanOldId.toLowerCase()) {
+      return savedOpUuid;
+    }
+  }
+
+  notifyRenderer("info-loading-status", {
+    text: "Auto-healing AnimePahe UUID from directory, please wait...",
+  });
+  try {
+    const syncResult = await syncPaheDirectory(cleanOldId);
+    if (
+      syncResult?.resolvedNewUuid &&
+      syncResult.resolvedNewUuid.toLowerCase() !== cleanOldId.toLowerCase()
+    ) {
+      return syncResult.resolvedNewUuid;
+    }
+  } catch (err) {
+    console.error("[AnimePahe] Failed to heal UUID:", err.message);
+  } finally {
+    notifyRenderer("info-loading-status", { text: "" });
+  }
+
+  return null;
+}
+
+async function checkCanary(canaryData) {
+  const expectedOnePieceUuid =
+    typeof canaryData === "object"
+      ? canaryData?.onePieceUuid
+      : typeof canaryData === "string"
+        ? canaryData
+        : null;
+  if (!expectedOnePieceUuid) return;
+  console.log(
+    `[AnimePahe] Server requested canary check. Expected One Piece UUID: ${expectedOnePieceUuid}`,
+  );
+
+  let html = "";
+  if (typeof global.scrapperFetch === "function") {
+    try {
+      html = await global.scrapperFetch(`${baseUrl}/anime`);
+    } catch (_) {}
+  }
+  if (!html) {
+    try {
+      const res = await safeGet(`${baseUrl}/anime`, {}, 2);
+      html = typeof res?.data === "string" ? res.data : "";
+    } catch (err) {
+      console.warn(`[AnimePahe] Canary check fetch failed: ${err.message}`);
+      return;
+    }
+  }
+
+  if (!html) return;
+
+  const opRegex =
+    /<a\s+[^>]*href="\/anime\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"[^>]*>([\s\S]*?)<\/a>/gi;
+  let m;
+  let currentOpUuid = null;
+  while ((m = opRegex.exec(html)) !== null) {
+    const u = m[1].toLowerCase().trim();
+    const n = (m[2] || "")
+      .replace(/<[^>]+>/g, "")
+      .replace(/[\r\n\t]+/g, " ")
+      .trim();
+    if (n.toLowerCase() === "one piece") {
+      currentOpUuid = u;
+      break;
+    }
+  }
+
+  const client = global.axios || require("axios");
+
+  if (
+    currentOpUuid &&
+    currentOpUuid === expectedOnePieceUuid.toLowerCase().trim()
+  ) {
+    console.log(
+      `[AnimePahe] One Piece canary verified unchanged (${currentOpUuid}). Reporting to server...`,
+    );
+    await setSavedSetting("pahe_one_piece_uuid", currentOpUuid);
+    try {
+      await client.post(
+        "https://strawverse.theyogmehta.online/api/pahe/canary",
+        {
+          onePieceUuid: currentOpUuid,
+          rotated: false,
+        },
+        { timeout: 15000 },
+      );
+    } catch (postErr) {
+      console.warn(
+        `[AnimePahe] Failed to report canary status to server: ${postErr.message}`,
+      );
+    }
+  } else if (currentOpUuid) {
+    console.log(
+      `[AnimePahe] One Piece canary ROTATION detected (${expectedOnePieceUuid} -> ${currentOpUuid}). Synchronizing catalog with mapping server...`,
+    );
+    const syncRes = await syncPaheDirectory(null, html, true);
+    if (syncRes && !syncRes.skipped) {
+      console.log(
+        `[AnimePahe] Catalog successfully uploaded to server (version: ${syncRes.version || "updated"}). Downloading updated mapping from server...`,
+      );
+      if (typeof global.checkForMappingUpdates === "function") {
+        try {
+          await global.checkForMappingUpdates(true);
+        } catch (_) {}
+      }
+    }
+  }
+}
+
+async function onInfoFetched({ id, info, mappingDb }) {
+  if (!id || (!info?.malid && !info?.MalID) || !mappingDb) return;
+  try {
+    const parsedMalId = Number(info.malid || info.MalID);
+    const existingPaheRow = await mappingDb
+      .prepare(
+        "SELECT id, uuid, malid FROM pahe WHERE uuid = ? OR malid = ? LIMIT 1",
+      )
+      .get(id, parsedMalId);
+
+    const isMissingOrDiff =
+      !existingPaheRow ||
+      existingPaheRow.malid !== parsedMalId ||
+      existingPaheRow.uuid !== id;
+
+    if (isMissingOrDiff) {
+      const client = global.axios || require("axios");
+      await client.post(
+        "https://strawverse.theyogmehta.online/api/pahe/report",
+        {
+          uuid: id,
+          id: info.dataId ? String(info.dataId) : null,
+          malid: parsedMalId,
+          name: info.title || null,
+        },
+        { timeout: 5000 },
+      );
+    }
+  } catch (_) {}
+}
+
 module.exports = {
   name: "pahe",
-  version: "5.0.6",
+  version: "6.0.0",
+  baseUrl,
+  headerRules: [
+    {
+      match: ["animepahe", "anipixcdn"],
+      headers: { Referer: "https://animepahe.pw/" },
+    },
+    {
+      match: ["owocdn", "uwucdn", "kwik"],
+      headers: { Referer: "https://kwik.cx/" },
+    },
+  ],
+  subrequestHeaders: [
+    {
+      match: ["owocdn", "uwucdn", "kwik"],
+      headers: { Referer: "https://kwik.cx/" },
+    },
+  ],
+  bypassDomains: ["animepahe", "kwik.cx"],
+  cookieDomains: [
+    "animepahe.pw",
+    "animepahe.com",
+    "animepahe.org",
+    "anipixcdn",
+  ],
+  domainAliases: {
+    "owocdn.top": "kwik.cx",
+    "uwucdn.top": "kwik.cx",
+  },
+  isPageLoaded,
+  healId,
+  checkCanary,
+  onInfoFetched,
   SearchAnime,
   AnimeInfo,
   fetchEpisodeSources,
