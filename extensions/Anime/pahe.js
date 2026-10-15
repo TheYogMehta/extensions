@@ -1282,7 +1282,7 @@ async function checkCanary(canaryData) {
   }
   if (!html) {
     try {
-      const res = await safeGet(`${baseUrl}/anime`, {}, 2);
+      const res = await safeGet(`${baseUrl}/anime`, { skipBypass: true }, 2);
       html = typeof res?.data === "string" ? res.data : "";
     } catch (err) {
       console.warn(`[AnimePahe] Canary check fetch failed: ${err.message}`);
@@ -1383,7 +1383,7 @@ async function onInfoFetched({ id, info, mappingDb }) {
 
 module.exports = {
   name: "pahe",
-  version: "6.0.0",
+  version: "6.0.1",
   baseUrl,
   headerRules: [
     {
