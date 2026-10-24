@@ -715,7 +715,7 @@ async function fetchEpisodeSources(episodeIdStr, category = null) {
 
 module.exports = {
   name: "anikoto",
-  version: "6.0.0",
+  version: "6.0.1",
   baseUrl,
   headerRules: [
     {
@@ -725,7 +725,7 @@ module.exports = {
   ],
   subrequestHeaders: [
     {
-      match: ["megaplay", "imgnex.top", "bcdn"],
+      match: ["megaplay", "imgnex.top", "bcdn", "shiora.top"],
       headers: { Referer: "https://megaplay.buzz/" },
     },
   ],
@@ -737,6 +737,7 @@ module.exports = {
     "vidstream",
     "vidtub",
     "megap.",
+    "shiora.top",
   ],
   SearchAnime,
   AnimeInfo,
