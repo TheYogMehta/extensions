@@ -118,6 +118,73 @@ async function getSavedOnePieceUuid() {
   return null;
 }
 
+function isValidPaheUuid(str) {
+  return (
+    typeof str === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      str.trim(),
+    )
+  );
+}
+
+async function resolvePaheUuid(id) {
+  if (!id) return null;
+  const cleanId = String(id).trim();
+  if (isValidPaheUuid(cleanId)) return cleanId.toLowerCase();
+
+  const db = getExtensionDatabase();
+  if (db) {
+    try {
+      const row = await db
+        .prepare("SELECT uuid FROM pahe WHERE id = ? LIMIT 1")
+        .get(cleanId);
+      if (row?.uuid && isValidPaheUuid(row.uuid)) {
+        return row.uuid.trim().toLowerCase();
+      }
+    } catch (_) {}
+  }
+
+  if (global.mappingDb) {
+    try {
+      const row = global.mappingDb
+        .prepare("SELECT uuid FROM pahe WHERE id = ? LIMIT 1")
+        .get(cleanId);
+      if (row?.uuid && isValidPaheUuid(row.uuid)) {
+        return row.uuid.trim().toLowerCase();
+      }
+    } catch (_) {}
+  }
+
+  return cleanId;
+}
+
+async function resolvePaheId(uuid) {
+  if (!uuid) return null;
+  const cleanUuid = String(uuid).trim();
+  if (!isValidPaheUuid(cleanUuid)) return cleanUuid;
+
+  const db = getExtensionDatabase();
+  if (db) {
+    try {
+      const row = await db
+        .prepare("SELECT id FROM pahe WHERE uuid = ? LIMIT 1")
+        .get(cleanUuid.toLowerCase());
+      if (row?.id) return String(row.id).trim();
+    } catch (_) {}
+  }
+
+  if (global.mappingDb) {
+    try {
+      const row = global.mappingDb
+        .prepare("SELECT id FROM pahe WHERE uuid = ? LIMIT 1")
+        .get(cleanUuid.toLowerCase());
+      if (row?.id) return String(row.id).trim();
+    } catch (_) {}
+  }
+
+  return cleanUuid;
+}
+
 async function syncPaheDirectory(
   brokenUuid = null,
   cachedHtml = null,
@@ -532,15 +599,40 @@ async function SearchAnime(query) {
     5,
     { expectJson: true },
   );
+
+  const rawList = data?.data || [];
+  const db = getExtensionDatabase();
+
+  const results = [];
+  for (const item of rawList) {
+    const itemSession = item?.session
+      ? String(item.session).trim().toLowerCase()
+      : null;
+    const itemId = item?.id ? String(item.id).trim() : null;
+    const finalId = itemId || itemSession;
+
+    if (db && itemId && itemSession) {
+      try {
+        await db
+          .prepare(
+            "INSERT INTO pahe (id, uuid) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET uuid = excluded.uuid",
+          )
+          .run(itemId, itemSession);
+      } catch (_) {}
+    }
+
+    results.push({
+      id: finalId,
+      title: item.title,
+      image: item?.poster,
+    });
+  }
+
   const res = {
     currentPage: 1,
     hasNextPage: false,
     totalPages: 1,
-    results: (data?.data || []).map((item) => ({
-      id: `${item.session}`,
-      title: item.title,
-      image: item?.poster,
-    })),
+    results,
   };
   return res;
 }
@@ -662,43 +754,45 @@ async function resolvePosterImage(uuid, title, fallbackImage) {
       }
 
       if (!malid && title) {
-        const candidates = generateNormalizedTitleCandidates(title);
-        for (const cand of candidates) {
-          const tRow = await db
-            .prepare(
-              "SELECT malid, image_url FROM anime WHERE LOWER(TRIM(title)) = ? LIMIT 1",
-            )
-            .get(cand.toLowerCase());
-          if (tRow?.malid) {
-            malid = tRow.malid;
-            if (tRow.image_url) {
-              return { image: tRow.image_url, malid };
-            }
-            break;
-          }
-        }
-
-        if (!malid) {
-          const baseClean = cleanBaseTitle(title);
-          if (baseClean && baseClean.length >= 4) {
-            let orderSql = "ORDER BY LENGTH(title) ASC";
-            if (/\b(?:season\s*2|2nd\s*season)\b/i.test(title)) {
-              orderSql =
-                "ORDER BY CASE WHEN title LIKE '%2%' OR title LIKE '%Season 2%' THEN 0 ELSE 1 END, LENGTH(title) ASC";
-            }
-            const likeRow = await db
+        try {
+          const candidates = generateNormalizedTitleCandidates(title);
+          for (const cand of candidates) {
+            const tRow = await db
               .prepare(
-                `SELECT malid, image_url FROM anime WHERE title LIKE ? ${orderSql} LIMIT 1`,
+                "SELECT malid, image_url FROM anime WHERE LOWER(TRIM(title)) = ? LIMIT 1",
               )
-              .get(`${baseClean}%`);
-            if (likeRow?.malid) {
-              malid = likeRow.malid;
-              if (likeRow.image_url) {
-                return { image: likeRow.image_url, malid };
+              .get(cand.toLowerCase());
+            if (tRow?.malid) {
+              malid = tRow.malid;
+              if (tRow.image_url) {
+                return { image: tRow.image_url, malid };
+              }
+              break;
+            }
+          }
+
+          if (!malid) {
+            const baseClean = cleanBaseTitle(title);
+            if (baseClean && baseClean.length >= 4) {
+              let orderSql = "ORDER BY LENGTH(title) ASC";
+              if (/\b(?:season\s*2|2nd\s*season)\b/i.test(title)) {
+                orderSql =
+                  "ORDER BY CASE WHEN title LIKE '%2%' OR title LIKE '%Season 2%' THEN 0 ELSE 1 END, LENGTH(title) ASC";
+              }
+              const likeRow = await db
+                .prepare(
+                  `SELECT malid, image_url FROM anime WHERE title LIKE ? ${orderSql} LIMIT 1`,
+                )
+                .get(`${baseClean}%`);
+              if (likeRow?.malid) {
+                malid = likeRow.malid;
+                if (likeRow.image_url) {
+                  return { image: likeRow.image_url, malid };
+                }
               }
             }
           }
-        }
+        } catch (_) {}
       }
 
       if (malid) {
@@ -761,6 +855,7 @@ async function fetchRecentEpisodes(filters = {}) {
         );
         const enrichedParsed = await Promise.all(
           parsed.map(async (item) => {
+            const permId = await resolvePaheId(item.id);
             const { image, malid } = await resolvePosterImage(
               item.id,
               item.title,
@@ -768,6 +863,7 @@ async function fetchRecentEpisodes(filters = {}) {
             );
             return {
               ...item,
+              id: permId || item.id,
               image: image || item.image,
               snapshot: item.image,
               malid,
@@ -803,13 +899,16 @@ async function fetchRecentEpisodes(filters = {}) {
 
   const enrichedResults = await Promise.all(
     (data?.data || []).map(async (item) => {
+      const permId =
+        (item.anime_id ? String(item.anime_id) : null) ||
+        (await resolvePaheId(item.anime_session));
       const { image, malid } = await resolvePosterImage(
         item.anime_session,
         item.anime_title,
         item?.snapshot,
       );
       return {
-        id: `${item.anime_session}`,
+        id: permId || `${item.anime_session}`,
         title: item.anime_title,
         image: image || item?.snapshot,
         snapshot: item?.snapshot,
@@ -830,13 +929,15 @@ async function fetchRecentEpisodes(filters = {}) {
 
 // Animeinfo
 async function AnimeInfo(id) {
+  const cleanId = String(id).trim();
+  const targetUuid = await resolvePaheUuid(cleanId);
   const animeInfo = {
-    id: id,
+    id: cleanId,
     title: "",
   };
 
   try {
-    const res = await safeGet(`${baseUrl}/anime/${id}`, {
+    const res = await safeGet(`${baseUrl}/anime/${targetUuid}`, {
       headers: {
         Referer: baseUrl,
       },
@@ -861,15 +962,15 @@ async function AnimeInfo(id) {
       parseInt($('meta[name="myanimelist"]').attr("content") ?? null) ?? null;
 
     animeInfo.malid = MalId;
-    if (MalId && id) {
+    if (MalId) {
       const db = getExtensionDatabase();
       if (db) {
         try {
           await db
             .prepare(
-              "INSERT INTO pahe (id, uuid, malid) VALUES (?, ?, ?) ON CONFLICT(malid) DO UPDATE SET uuid = excluded.uuid, id = excluded.id",
+              "INSERT INTO pahe (id, uuid, malid) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET uuid = excluded.uuid, malid = excluded.malid",
             )
-            .run(id, id, MalId);
+            .run(cleanId, targetUuid, MalId);
         } catch (_) {}
       }
     }
@@ -946,7 +1047,8 @@ async function AnimeInfo(id) {
         .replace(/Duration:\s*/i, "")
         .trim() || null;
 
-    animeInfo.dataId = id;
+    animeInfo.dataId = cleanId;
+    animeInfo.uuid = targetUuid;
 
     return animeInfo;
   } catch (error) {
@@ -955,26 +1057,29 @@ async function AnimeInfo(id) {
       error?.response?.status === 404 ||
       error?.message?.includes("404");
 
-    if (is404 && id) {
+    if (is404 && targetUuid) {
       console.warn(
-        `[AnimePahe] UUID ${id} returned 404. Checking canary and directory to auto-heal UUID...`,
+        `[AnimePahe] UUID ${targetUuid} (ID: ${cleanId}) returned 404. Checking canary and directory to auto-heal UUID...`,
       );
 
       // Fast check: if this broken UUID belongs to One Piece and we already have a newer canary UUID
       const savedOpUuid = await getSavedOnePieceUuid();
       if (
         savedOpUuid &&
-        String(id).toLowerCase() !== savedOpUuid.toLowerCase()
+        String(targetUuid).toLowerCase() !== savedOpUuid.toLowerCase()
       ) {
-        if (id === "4" || id === "858fa643-262f-5c07-d80f-28dece13d592") {
+        if (
+          cleanId === "4" ||
+          targetUuid === "858fa643-262f-5c07-d80f-28dece13d592"
+        ) {
           console.log(
-            `[AnimePahe] Auto-healing broken One Piece UUID ${id} -> ${savedOpUuid} via saved canary UUID`,
+            `[AnimePahe] Auto-healing broken One Piece UUID ${targetUuid} -> ${savedOpUuid} via saved canary UUID`,
           );
           return {
             needsMappingSync: true,
-            brokenUuid: id,
+            brokenUuid: targetUuid,
             newUuid: savedOpUuid,
-            dataId: savedOpUuid,
+            dataId: cleanId,
             version: null,
           };
         }
@@ -986,13 +1091,23 @@ async function AnimeInfo(id) {
       let resolvedNewUuid = null;
       let resolvedVersion = null;
       try {
-        const syncResult = await syncPaheDirectory(id);
+        const syncResult = await syncPaheDirectory(targetUuid);
         if (syncResult?.resolvedNewUuid) {
           resolvedNewUuid = syncResult.resolvedNewUuid;
           resolvedVersion = syncResult.version;
           console.log(
-            `[AnimePahe] Server auto-healed UUID ${id} -> ${resolvedNewUuid}`,
+            `[AnimePahe] Server auto-healed UUID ${targetUuid} -> ${resolvedNewUuid}`,
           );
+          const db = getExtensionDatabase();
+          if (db) {
+            try {
+              await db
+                .prepare(
+                  "INSERT INTO pahe (id, uuid) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET uuid = excluded.uuid",
+                )
+                .run(cleanId, resolvedNewUuid);
+            } catch (_) {}
+          }
         }
       } catch (recoveryErr) {
         console.error(
@@ -1011,17 +1126,17 @@ async function AnimeInfo(id) {
         });
         return {
           needsMappingSync: true,
-          brokenUuid: id,
+          brokenUuid: targetUuid,
           newUuid: resolvedNewUuid,
-          dataId: resolvedNewUuid,
+          dataId: cleanId,
           version: resolvedVersion || null,
         };
       } else {
         return {
           needsMappingSync: false,
-          brokenUuid: id,
+          brokenUuid: targetUuid,
           newUuid: null,
-          dataId: id,
+          dataId: cleanId,
           version: null,
         };
       }
@@ -1035,12 +1150,13 @@ async function AnimeInfo(id) {
 const firstEpCache = {};
 
 async function getFirstEpisodeNumber(id, lastPage) {
-  if (firstEpCache[id] !== undefined) {
-    return firstEpCache[id];
+  const targetUuid = await resolvePaheUuid(id);
+  if (firstEpCache[targetUuid] !== undefined) {
+    return firstEpCache[targetUuid];
   }
   try {
     const { data } = await safeGet(
-      `${baseUrl}/api?m=release&id=${id}&sort=episode_desc&page=${lastPage}`,
+      `${baseUrl}/api?m=release&id=${targetUuid}&sort=episode_desc&page=${lastPage}`,
       {
         headers: {
           Referer: baseUrl,
@@ -1051,22 +1167,23 @@ async function getFirstEpisodeNumber(id, lastPage) {
     );
     if (data?.data && data.data.length > 0) {
       const firstEp = data.data[data.data.length - 1].episode;
-      firstEpCache[id] = firstEp;
+      firstEpCache[targetUuid] = firstEp;
       return firstEp;
     }
   } catch (err) {
     console.error("Failed to fetch first episode number:", err);
   }
-  firstEpCache[id] = 1;
+  firstEpCache[targetUuid] = 1;
   return 1;
 }
 
 // Fetching Episodes Pages
 async function fetchEpisode(id, page = 1) {
   try {
+    const targetUuid = await resolvePaheUuid(id);
     let episodes = [];
     const resp = await safeGet(
-      `${baseUrl}/api?m=release&id=${id}&sort=episode_desc&page=${page}`,
+      `${baseUrl}/api?m=release&id=${targetUuid}&sort=episode_desc&page=${page}`,
       {
         headers: {
           Referer: baseUrl,
@@ -1090,7 +1207,7 @@ async function fetchEpisode(id, page = 1) {
     }
     const { last_page, data, total } = respData;
 
-    const firstEpNum = await getFirstEpisodeNumber(id, last_page);
+    const firstEpNum = await getFirstEpisodeNumber(targetUuid, last_page);
     const offset = firstEpNum - 1;
 
     data.forEach((item) => {
@@ -1131,7 +1248,13 @@ async function fetchEpisode(id, page = 1) {
 // fetching Episodes Download Links
 async function fetchEpisodeSources(episodeId, category = null) {
   try {
-    const { data } = await safeGet(`${baseUrl}/play/${episodeId}`, {
+    let targetEpisodeId = episodeId;
+    if (episodeId && episodeId.includes("/")) {
+      const [animePart, epPart] = episodeId.split("/");
+      const resolvedAnimeUuid = await resolvePaheUuid(animePart);
+      targetEpisodeId = `${resolvedAnimeUuid}/${epPart}`;
+    }
+    const { data } = await safeGet(`${baseUrl}/play/${targetEpisodeId}`, {
       headers: {
         Referer: baseUrl,
       },
@@ -1475,8 +1598,29 @@ async function checkCanary(canaryData) {
 async function onInfoFetched({ id, info, api }) {
   if (!id || !info || !api) return;
   try {
-    const parsedMalId =
+    let parsedMalId =
       info?.malid || info?.MalID ? Number(info.malid || info.MalID) : null;
+
+    if (!parsedMalId && info.title) {
+      try {
+        const db = getExtensionDatabase();
+        if (db) {
+          const candidates = generateNormalizedTitleCandidates(info.title);
+          for (const cand of candidates) {
+            const tRow = await db
+              .prepare(
+                "SELECT malid FROM anime WHERE LOWER(TRIM(title)) = ? LIMIT 1",
+              )
+              .get(cand.toLowerCase());
+            if (tRow?.malid) {
+              parsedMalId = Number(tRow.malid);
+              break;
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
     const isMapped = (await api.isMapped(id)) || !!parsedMalId;
 
     if (!isMapped) {
@@ -1507,8 +1651,8 @@ async function onInfoFetched({ id, info, api }) {
         typeof api.reportMapping === "function"
       ) {
         await api.reportMapping({
-          uuid: id,
-          id: info.dataId ? String(info.dataId) : null,
+          uuid: info.uuid || (isValidPaheUuid(id) ? id : null),
+          id: info.dataId ? String(info.dataId) : String(id),
           malid: parsedMalId,
           name: info.title || null,
         });
@@ -1519,7 +1663,7 @@ async function onInfoFetched({ id, info, api }) {
 
 module.exports = {
   name: "pahe",
-  version: "7.0.0",
+  version: "7.0.1",
   baseUrl,
   headerRules: [
     {
