@@ -28,7 +28,6 @@ const cheerio = require("cheerio");
 // variables
 // Mirror priority: hosts that may serve the real API behind Cloudflare
 // (403 to bots, solvable via in-app CF bypass) come BEFORE known
-// WordPress clones (.ng/.ch return 200 + HTML with no API).
 // safeGet validates response SHAPE, so dead/clone mirrors are skipped
 // automatically instead of silently poisoning results.
 const baseUrls = [
@@ -80,40 +79,37 @@ function notifyRenderer(channel, payload) {
 let lastRequestTime = 0;
 const MIN_REQUEST_INTERVAL = 1500;
 
-let lastDirectorySyncTime = 0;
 let isDirectorySyncRunning = false;
-const DIRECTORY_SYNC_INTERVAL = 60 * 60 * 1000; // 1 hour
+
+function getExtensionDatabase() {
+  if (typeof global.getExtensionDb === "function") {
+    return global.getExtensionDb("pahe", "TheYogMehta");
+  }
+  return null;
+}
 
 async function getSavedSetting(key) {
-  if (!global.db) return null;
-  try {
-    const row = await global.db
-      .prepare("SELECT value FROM Settings WHERE key = ?")
-      .get(key);
-    return row ? row.value : null;
-  } catch (_) {
-    return null;
+  const db = getExtensionDatabase();
+  if (db?.getSetting) {
+    return await db.getSetting(key);
   }
+  return null;
 }
 
 async function setSavedSetting(key, value) {
-  if (!global.db) return;
-  try {
-    await global.db
-      .prepare("INSERT OR REPLACE INTO Settings (key, value) VALUES (?, ?)")
-      .run(key, String(value));
-  } catch (_) {}
+  const db = getExtensionDatabase();
+  if (db?.setSetting) {
+    await db.setSetting(key, value);
+  }
 }
 
 async function getSavedOnePieceUuid() {
-  // 1. Check Settings in database.db
   const fromSettings = await getSavedSetting("pahe_one_piece_uuid");
   if (fromSettings) return fromSettings.trim();
-
-  // 2. Check mapping.db pahe table for One Piece (id '4' or malid 21)
-  if (global.mappingDb) {
+  const db = getExtensionDatabase();
+  if (db) {
     try {
-      const row = await global.mappingDb
+      const row = await db
         .prepare("SELECT uuid FROM pahe WHERE id = '4' OR malid = 21 LIMIT 1")
         .get();
       if (row?.uuid) return row.uuid.trim();
@@ -129,7 +125,6 @@ async function syncPaheDirectory(
 ) {
   if (isDirectorySyncRunning) return null;
   isDirectorySyncRunning = true;
-  lastDirectorySyncTime = Date.now();
 
   try {
     console.log("[AnimePahe] Starting /anime directory sync...");
@@ -272,8 +267,6 @@ async function syncPaheDirectory(
     const client = global.axios || require("axios");
     const syncEndpoints = [
       "https://strawverse.theyogmehta.online/api/pahe/index",
-      "http://localhost:9843/api/pahe/index",
-      "http://localhost:33544/api/pahe/index",
     ];
 
     let syncRes = null;
@@ -293,55 +286,46 @@ async function syncPaheDirectory(
       } catch (_) {}
     }
 
-    // 6. If server returned updated mappings, apply directly to local mappingDb
-    if (
-      global.mappingDb &&
-      syncRes?.data?.updatedMappings &&
-      Array.isArray(syncRes.data.updatedMappings)
-    ) {
-      try {
-        let applied = 0;
-        for (const m of syncRes.data.updatedMappings) {
-          if (m.newUuid) {
-            if (m.id) {
-              await global.mappingDb
-                .prepare("UPDATE pahe SET uuid = ? WHERE id = ?")
-                .run(m.newUuid, m.id);
-              applied++;
-            } else if (m.malid) {
-              await global.mappingDb
-                .prepare("UPDATE pahe SET uuid = ? WHERE malid = ?")
-                .run(m.newUuid, m.malid);
-              applied++;
-            }
-          }
-        }
-        if (applied > 0) {
-          console.log(
-            `[AnimePahe] Applied ${applied} updated MAL ID mappings to local mappingDb.`,
-          );
-        }
-      } catch (errLocalMap) {
-        console.warn(
-          "[AnimePahe] Failed applying mappings to mappingDb:",
-          errLocalMap?.message,
-        );
-      }
-    }
-
-    // 7. Update One Piece in local mappingDb and Settings table
     if (currentOpUuid) {
-      if (global.mappingDb) {
+      const db = getExtensionDatabase();
+      if (db) {
         try {
-          await global.mappingDb
+          await db
             .prepare("UPDATE pahe SET uuid = ? WHERE id = '4' OR malid = 21")
             .run(currentOpUuid);
+        } catch (_) {}
+
+        try {
+          const unmappedRows = await db
+            .prepare(
+              "SELECT id, name FROM unmapped_items WHERE provider = 'pahe'",
+            )
+            .all();
+          if (Array.isArray(unmappedRows) && unmappedRows.length > 0) {
+            for (const row of unmappedRows) {
+              const matched = links.find(
+                (l) =>
+                  l.name.trim().toLowerCase() ===
+                  (row.name || "").trim().toLowerCase(),
+              );
+              if (matched && matched.uuid && matched.uuid !== row.id) {
+                console.log(
+                  `[AnimePahe] Healing unmapped item '${row.name}': ${row.id} -> ${matched.uuid}`,
+                );
+                await db
+                  .prepare(
+                    "UPDATE unmapped_items SET id = ? WHERE provider = 'pahe' AND id = ?",
+                  )
+                  .run(matched.uuid, row.id);
+              }
+            }
+          }
         } catch (_) {}
       }
       await setSavedSetting("pahe_one_piece_uuid", currentOpUuid);
     }
 
-    // 8. Trigger mapping updates check so StrawVerse downloads latest delta release
+    // 7. Trigger mapping updates check so StrawVerse downloads latest delta release
     if (typeof global.checkForMappingUpdates === "function") {
       try {
         await global.checkForMappingUpdates(true);
@@ -537,7 +521,7 @@ async function safeGet(url, config = {}, maxRetries = 5, opts = {}) {
 }
 
 // Anime Search
-async function SearchAnime(query, filters = {}) {
+async function SearchAnime(query) {
   const { data } = await safeGet(
     `${baseUrl}/api?m=search&q=${encodeURIComponent(query)}`,
     {
@@ -601,10 +585,71 @@ function parseRecentEpisodesFromHtml(html) {
   }
 }
 
+function generateNormalizedTitleCandidates(rawTitle) {
+  if (!rawTitle || typeof rawTitle !== "string") return [];
+  const candidates = new Set();
+  const trimmed = rawTitle.trim();
+  if (!trimmed) return [];
+
+  candidates.add(trimmed);
+
+  const noDots = trimmed.replace(/[\.…]+\s*$/, "").trim();
+  if (noDots && noDots !== trimmed) candidates.add(noDots);
+
+  const noParen = trimmed
+    .replace(/\s*\((?:tv|ona|ova|movie|special|dub|sub|\d{4})\)\s*$/i, "")
+    .trim();
+  if (noParen && noParen !== trimmed) candidates.add(noParen);
+
+  let stripped = trimmed.replace(/[\.…]+\s*$/, "");
+  const patterns = [
+    /\s+(?:part|cour)\s+\d+.*$/i,
+    /\s*-\s*(?:part|cour)\s+\d+.*$/i,
+    /\s+(?:season|\b\d+(?:st|nd|rd|th)\s+season)\s*.*$/i,
+    /\s*-\s*(?:season|\b\d+(?:st|nd|rd|th)\s+season)\s*.*$/i,
+    /\s*\((?:season|\b\d+(?:st|nd|rd|th)\s+season)\s*.*\)$/i,
+    /\s*-\s*[^:]+$/i,
+  ];
+
+  for (const pat of patterns) {
+    const next = stripped.replace(pat, "").trim();
+    if (next && next.length >= 2 && next !== stripped) {
+      candidates.add(next);
+      stripped = next;
+    }
+  }
+
+  if (trimmed.includes(":")) {
+    const beforeColon = trimmed.split(":")[0].trim();
+    if (beforeColon && beforeColon.length >= 3) {
+      candidates.add(beforeColon);
+    }
+  }
+
+  return Array.from(candidates);
+}
+
+function cleanBaseTitle(title) {
+  if (!title || typeof title !== "string") return "";
+  return title
+    .replace(/[\.…]+\s*$/, "")
+    .replace(/\s+(?:season|\b\d+(?:st|nd|rd|th)\s+season|part|cour)\s*.*$/i, "")
+    .replace(
+      /\s*-\s*(?:season|\b\d+(?:st|nd|rd|th)\s+season|part|cour)\s*.*$/i,
+      "",
+    )
+    .replace(
+      /\s*\((?:season|\b\d+(?:st|nd|rd|th)\s+season|tv|part|cour)\s*.*\)$/i,
+      "",
+    )
+    .trim();
+}
+
 async function resolvePosterImage(uuid, title, fallbackImage) {
-  try {
-    if (global.mappingDb) {
-      const row = await global.mappingDb
+  const db = getExtensionDatabase();
+  if (db) {
+    try {
+      const row = await db
         .prepare("SELECT malid FROM pahe WHERE uuid = ? OR id = ? LIMIT 1")
         .get(uuid, uuid);
       let malid = row?.malid;
@@ -615,45 +660,69 @@ async function resolvePosterImage(uuid, title, fallbackImage) {
       ) {
         malid = 21;
       }
+
+      if (!malid && title) {
+        const candidates = generateNormalizedTitleCandidates(title);
+        for (const cand of candidates) {
+          const tRow = await db
+            .prepare(
+              "SELECT malid, image_url FROM anime WHERE LOWER(TRIM(title)) = ? LIMIT 1",
+            )
+            .get(cand.toLowerCase());
+          if (tRow?.malid) {
+            malid = tRow.malid;
+            if (tRow.image_url) {
+              return { image: tRow.image_url, malid };
+            }
+            break;
+          }
+        }
+
+        if (!malid) {
+          const baseClean = cleanBaseTitle(title);
+          if (baseClean && baseClean.length >= 4) {
+            let orderSql = "ORDER BY LENGTH(title) ASC";
+            if (/\b(?:season\s*2|2nd\s*season)\b/i.test(title)) {
+              orderSql =
+                "ORDER BY CASE WHEN title LIKE '%2%' OR title LIKE '%Season 2%' THEN 0 ELSE 1 END, LENGTH(title) ASC";
+            }
+            const likeRow = await db
+              .prepare(
+                `SELECT malid, image_url FROM anime WHERE title LIKE ? ${orderSql} LIMIT 1`,
+              )
+              .get(`${baseClean}%`);
+            if (likeRow?.malid) {
+              malid = likeRow.malid;
+              if (likeRow.image_url) {
+                return { image: likeRow.image_url, malid };
+              }
+            }
+          }
+        }
+      }
+
       if (malid) {
-        const aRow = await global.mappingDb
+        const aRow = await db
           .prepare("SELECT image_url FROM anime WHERE malid = ? LIMIT 1")
           .get(malid);
         if (aRow?.image_url) {
           return { image: aRow.image_url, malid };
         }
       }
-    }
-  } catch (_) {}
 
-  try {
-    if (global.db) {
-      const aRow = await global.db
-        .prepare(
-          "SELECT MalID, image_url FROM Anime WHERE id = ? OR LOWER(TRIM(title)) = ? LIMIT 1",
-        )
-        .get(uuid, (title || "").toLowerCase().trim());
-      if (aRow?.image_url) {
-        return {
-          image: aRow.image_url,
-          malid: aRow.MalID ? Number(aRow.MalID) : null,
-        };
+      if (uuid || title) {
+        const uRow = await db
+          .prepare(
+            "SELECT image_url FROM unmapped_items WHERE (id = ? OR name = ?) AND image_url IS NOT NULL AND image_url != '' LIMIT 1",
+          )
+          .get(uuid || "", title || "");
+        if (uRow?.image_url) {
+          return { image: uRow.image_url, malid: null };
+        }
       }
-      const mRow = await global.db
-        .prepare(
-          "SELECT id, image FROM MyAnimeList WHERE id = ? OR LOWER(TRIM(title)) = ? LIMIT 1",
-        )
-        .get(uuid, (title || "").toLowerCase().trim());
-      if (mRow?.image) {
-        return {
-          image: mRow.image,
-          malid: mRow.id ? Number(mRow.id) : null,
-        };
-      }
-    }
-  } catch (_) {}
-
-  return { image: fallbackImage, malid: null };
+    } catch (_) {}
+  }
+  return { image: fallbackImage || "/images/image-404.png", malid: null };
 }
 
 // Recent Episodes
@@ -792,14 +861,17 @@ async function AnimeInfo(id) {
       parseInt($('meta[name="myanimelist"]').attr("content") ?? null) ?? null;
 
     animeInfo.malid = MalId;
-    if (MalId && id && global.mappingDb) {
-      try {
-        global.mappingDb
-          .prepare(
-            "INSERT INTO pahe (id, uuid, malid) VALUES (?, ?, ?) ON CONFLICT(malid) DO UPDATE SET uuid = excluded.uuid, id = excluded.id",
-          )
-          .run(id, id, MalId);
-      } catch (_) {}
+    if (MalId && id) {
+      const db = getExtensionDatabase();
+      if (db) {
+        try {
+          await db
+            .prepare(
+              "INSERT INTO pahe (id, uuid, malid) VALUES (?, ?, ?) ON CONFLICT(malid) DO UPDATE SET uuid = excluded.uuid, id = excluded.id",
+            )
+            .run(id, id, MalId);
+        } catch (_) {}
+      }
     }
     animeInfo.title = $("div.title-wrapper > h1 > span").first().text();
     const resolvePoster = (u) => {
@@ -817,7 +889,7 @@ async function AnimeInfo(id) {
     animeInfo.image = image;
     animeInfo.description = $("div.anime-summary").text();
     animeInfo.genres = $("div.anime-genre ul li")
-      .map((i, el) => $(el).find("a").attr("title"))
+      .map((_, el) => $(el).find("a").attr("title"))
       .get();
     switch (
       $('div.col-sm-4.anime-info p:icontains("Status:") a').text().trim()
@@ -844,6 +916,36 @@ async function AnimeInfo(id) {
       .replaceAll("  ", "")
       .trim();
 
+    const seasonText = $('div.col-sm-4.anime-info p:icontains("Season:") a')
+      .text()
+      .trim();
+    const seasonMatch = seasonText.match(
+      /(Winter|Spring|Summer|Fall)\s*(\d{4})/i,
+    );
+    if (seasonMatch) {
+      animeInfo.season = seasonMatch[1].toUpperCase();
+      animeInfo.year = parseInt(seasonMatch[2], 10);
+    }
+
+    const epText = $('div.col-sm-4.anime-info p:icontains("Episodes:")')
+      .text()
+      .replace(/Episodes:\s*/i, "")
+      .trim();
+    const epNum = parseInt(epText, 10);
+    if (!isNaN(epNum)) {
+      animeInfo.episodes = epNum;
+    }
+
+    animeInfo.studio =
+      $('div.col-sm-4.anime-info p:icontains("Studio:") a').text().trim() ||
+      null;
+
+    animeInfo.duration =
+      $('div.col-sm-4.anime-info p:icontains("Duration:")')
+        .text()
+        .replace(/Duration:\s*/i, "")
+        .trim() || null;
+
     animeInfo.dataId = id;
 
     return animeInfo;
@@ -864,33 +966,7 @@ async function AnimeInfo(id) {
         savedOpUuid &&
         String(id).toLowerCase() !== savedOpUuid.toLowerCase()
       ) {
-        let isOnePiece = false;
-        if (global.mappingDb) {
-          try {
-            const check = await global.mappingDb
-              .prepare(
-                "SELECT malid, id FROM pahe WHERE uuid = ? OR id = ? LIMIT 1",
-              )
-              .get(id, id);
-            if (check?.malid === 21 || check?.id === "4") isOnePiece = true;
-          } catch (_) {}
-        }
-        if (global.db && !isOnePiece) {
-          try {
-            const animeCheck = await global.db
-              .prepare(
-                "SELECT MalID, title FROM Anime WHERE id = ? OR id LIKE ? LIMIT 1",
-              )
-              .get(id, `${id}-%`);
-            if (
-              animeCheck?.MalID === "21" ||
-              /^one piece$/i.test(animeCheck?.title || "")
-            ) {
-              isOnePiece = true;
-            }
-          } catch (_) {}
-        }
-        if (isOnePiece) {
+        if (id === "4" || id === "858fa643-262f-5c07-d80f-28dece13d592") {
           console.log(
             `[AnimePahe] Auto-healing broken One Piece UUID ${id} -> ${savedOpUuid} via saved canary UUID`,
           );
@@ -1063,7 +1139,7 @@ async function fetchEpisodeSources(episodeId, category = null) {
     const $ = (0, cheerio.load)(data);
 
     let linksArray = $("div#resolutionMenu > button")
-      .map((i, el) => ({
+      .map((_, el) => ({
         url: $(el).attr("data-src"),
         quality: extractQualityNumber($(el).text()),
         audio: $(el).attr("data-audio"),
@@ -1184,7 +1260,7 @@ async function extract(videoUrl, retries = 2, delay = 1000) {
   }
 }
 
-function isPageLoaded(title, html) {
+function isPageLoaded(_, html) {
   if (!html || typeof html !== "string") return false;
   const lower = html.toLowerCase();
   return (
@@ -1197,29 +1273,22 @@ function isPageLoaded(title, html) {
   );
 }
 
-async function healId({ oldId, malid, title, folderName }) {
+async function healId({ oldId, malid, title }) {
   if (!oldId) return null;
   const cleanOldId = String(oldId).trim();
 
   let resolvedMalId = malid ? Number(malid) : null;
-  if (!resolvedMalId && global.mappingDb) {
-    try {
-      const row = await global.mappingDb
-        .prepare("SELECT malid FROM pahe WHERE uuid = ? OR id = ? LIMIT 1")
-        .get(cleanOldId, cleanOldId);
-      if (row?.malid) resolvedMalId = Number(row.malid);
-    } catch (_) {}
-  }
 
-  if (global.mappingDb) {
+  const db = getExtensionDatabase();
+  if (db) {
     try {
       let mappingRow = null;
       if (resolvedMalId) {
-        mappingRow = await global.mappingDb
+        mappingRow = await db
           .prepare("SELECT uuid FROM pahe WHERE malid = ? LIMIT 1")
           .get(resolvedMalId);
       } else {
-        mappingRow = await global.mappingDb
+        mappingRow = await db
           .prepare("SELECT uuid FROM pahe WHERE id = ? OR uuid = ? LIMIT 1")
           .get(cleanOldId, cleanOldId);
       }
@@ -1230,6 +1299,59 @@ async function healId({ oldId, malid, title, folderName }) {
         return mappingRow.uuid;
       }
     } catch (_) {}
+
+    try {
+      const unmappedRow = await db
+        .prepare(
+          "SELECT id, name FROM unmapped_items WHERE provider = 'pahe' AND (id = ? OR LOWER(TRIM(name)) = ?) LIMIT 1",
+        )
+        .get(cleanOldId, (title || "").toLowerCase().trim());
+      if (
+        unmappedRow?.id &&
+        unmappedRow.id.toLowerCase() !== cleanOldId.toLowerCase()
+      ) {
+        return unmappedRow.id;
+      }
+    } catch (_) {}
+  }
+
+  if (title) {
+    try {
+      const sRes = await SearchAnime(title);
+      const sResults = sRes?.results || (Array.isArray(sRes) ? sRes : []);
+      if (sResults.length > 0) {
+        const exact =
+          sResults.find(
+            (s) =>
+              (s.title || "").toLowerCase().trim() ===
+              String(title).toLowerCase().trim(),
+          ) || sResults[0];
+        if (
+          exact &&
+          exact.id &&
+          String(exact.id).toLowerCase() !== cleanOldId.toLowerCase()
+        ) {
+          const newUuid = String(exact.id).toLowerCase().trim();
+          if (db) {
+            try {
+              await db
+                .prepare(
+                  "UPDATE unmapped_items SET id = ?, image_url = COALESCE(?, image_url) WHERE provider = 'pahe' AND (id = ? OR LOWER(TRIM(name)) = ?)",
+                )
+                .run(
+                  newUuid,
+                  exact.image || exact.image_url || null,
+                  cleanOldId,
+                  String(title).toLowerCase().trim(),
+                );
+            } catch (_) {}
+          }
+          return newUuid;
+        }
+      }
+    } catch (e) {
+      console.warn("[AnimePahe] healId SearchAnime error:", e.message);
+    }
   }
 
   if (
@@ -1350,40 +1472,54 @@ async function checkCanary(canaryData) {
   }
 }
 
-async function onInfoFetched({ id, info, mappingDb }) {
-  if (!id || (!info?.malid && !info?.MalID) || !mappingDb) return;
+async function onInfoFetched({ id, info, api }) {
+  if (!id || !info || !api) return;
   try {
-    const parsedMalId = Number(info.malid || info.MalID);
-    const existingPaheRow = await mappingDb
-      .prepare(
-        "SELECT id, uuid, malid FROM pahe WHERE uuid = ? OR malid = ? LIMIT 1",
-      )
-      .get(id, parsedMalId);
+    const parsedMalId =
+      info?.malid || info?.MalID ? Number(info.malid || info.MalID) : null;
+    const isMapped = (await api.isMapped(id)) || !!parsedMalId;
 
-    const isMissingOrDiff =
-      !existingPaheRow ||
-      existingPaheRow.malid !== parsedMalId ||
-      existingPaheRow.uuid !== id;
+    if (!isMapped) {
+      // Unmapped series: persist metadata in mapping.db and report to server
+      if (typeof api.saveUnmapped === "function") {
+        await api.saveUnmapped({
+          id,
+          name: info.title || "Unknown",
+          image_url: info.image || null,
+          type: info.type || "TV",
+          episodes: info.episodes ? String(info.episodes) : null,
+          status: info.status || "Unknown",
+          season: info.season || null,
+          year: info.year ? parseInt(info.year, 10) : null,
+        });
+      }
+    } else {
+      // Mapped series: ensure cleaned from unmapped items
+      if (typeof api.deleteUnmapped === "function") {
+        await api.deleteUnmapped(id);
+      }
+    }
 
-    if (isMissingOrDiff) {
-      const client = global.axios || require("axios");
-      await client.post(
-        "https://strawverse.theyogmehta.online/api/pahe/report",
-        {
+    if (parsedMalId && typeof api.getMappedMalId === "function") {
+      const currentMalId = await api.getMappedMalId(id);
+      if (
+        currentMalId !== parsedMalId &&
+        typeof api.reportMapping === "function"
+      ) {
+        await api.reportMapping({
           uuid: id,
           id: info.dataId ? String(info.dataId) : null,
           malid: parsedMalId,
           name: info.title || null,
-        },
-        { timeout: 5000 },
-      );
+        });
+      }
     }
   } catch (_) {}
 }
 
 module.exports = {
   name: "pahe",
-  version: "6.0.1",
+  version: "7.0.0",
   baseUrl,
   headerRules: [
     {
@@ -1393,6 +1529,34 @@ module.exports = {
     {
       match: ["owocdn", "uwucdn", "kwik"],
       headers: { Referer: "https://kwik.cx/" },
+    },
+  ],
+  MappingRules: [
+    {
+      source: "info",
+      fields: [
+        "title",
+        "image",
+        "type",
+        "description",
+        "genres",
+        "status",
+        "season",
+        "year",
+        "episodes",
+        "aired",
+        "studio",
+        "duration",
+      ],
+      extractMalId: (info) => {
+        if (!info) return null;
+        if (info.malid) return info.malid;
+        if (typeof info.aniSearch === "string") {
+          const match = info.aniSearch.match(/myanimelist\.net\/anime\/(\d+)/i);
+          if (match) return parseInt(match[1], 10);
+        }
+        return null;
+      },
     },
   ],
   subrequestHeaders: [

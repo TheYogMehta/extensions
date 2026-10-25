@@ -216,6 +216,12 @@ async function fetchMangaInfo(mangaId) {
       }
     });
 
+    let year = null;
+    if (released) {
+      const yMatch = String(released).match(/\b(19\d\d|20\d\d)\b/);
+      if (yMatch) year = parseInt(yMatch[1], 10);
+    }
+
     return {
       id: mangaId,
       title,
@@ -225,6 +231,7 @@ async function fetchMangaInfo(mangaId) {
       author,
       type,
       released,
+      year,
       status,
     };
   } catch (err) {
@@ -301,7 +308,7 @@ async function fetchChapterPages(chapterId) {
 
 module.exports = {
   name: "asurascans",
-  version: "2.0.0",
+  version: "3.0.0",
   baseUrl,
   headerRules: [
     {

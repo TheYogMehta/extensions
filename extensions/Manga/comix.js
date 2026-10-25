@@ -129,6 +129,7 @@ async function fetchMangaInfo(mangaId) {
         author,
         type: "Manga",
         released: String(m?.attributes?.year || ""),
+        year: m?.attributes?.year ? parseInt(m.attributes.year, 10) : null,
         status: m?.attributes?.status || "Ongoing",
       };
     }
@@ -163,6 +164,7 @@ async function fetchMangaInfo(mangaId) {
       author: authors,
       type: detail.type || "Comic",
       released: detail.year ? String(detail.year) : "",
+      year: detail.year ? parseInt(detail.year, 10) : null,
       status: detail.status || "Ongoing",
     };
   } catch (err) {
@@ -242,7 +244,7 @@ async function fetchChapterPages(chapterId) {
 
 module.exports = {
   name: "comix",
-  version: "2.0.0",
+  version: "3.0.0",
   baseUrl,
   headerRules: [
     {

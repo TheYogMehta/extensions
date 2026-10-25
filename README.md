@@ -23,6 +23,7 @@ It covers:
 - Scraper lifecycle methods for Anime & Manga
 - Declarative header rules & dynamic stream headers (`global.registerStreamHeaders`)
 - Automated Cloudflare bypass rules (`bypassDomains`, `isPageLoaded`, cookie sharing)
+- Standardized info response format & automated catalog synchronization
 - Built-in security sandbox & safety restrictions
 - Publishing your repository to GitHub
 

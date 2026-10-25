@@ -14,8 +14,9 @@ Welcome to the **StrawVerse Extension Development Guide**! StrawVerse features a
 6. [Manga Extension Specification](#6-manga-extension-specification)
 7. [Declarative Header & Stream Rules](#7-declarative-header--stream-rules)
 8. [Cloudflare & Anti-Bot Bypass Rules](#8-cloudflare--anti-bot-bypass-rules)
-9. [Security Restrictions & Sandbox](#9-security-restrictions--sandbox)
-10. [Publishing & Adding Your Repo to StrawVerse](#10-publishing--adding-your-repo-to-strawverse)
+9. [Metadata Mapping & Catalog Sync](#9-metadata-mapping--catalog-sync)
+10. [Security Restrictions & Sandbox](#10-security-restrictions--sandbox)
+11. [Publishing & Adding Your Repo to StrawVerse](#11-publishing--adding-your-repo-to-strawverse)
 
 ---
 
@@ -23,7 +24,9 @@ Welcome to the **StrawVerse Extension Development Guide**! StrawVerse features a
 
 - **Decentralized:** Extensions are plain JavaScript modules hosted in public git repositories (e.g., on GitHub). StrawVerse fetches them directly without requiring centralized store approvals.
 - **Client-Side:** Scrapers execute client-side inside StrawVerse, parsing HTML or JSON from public websites and streaming content directly to the user's video player or manga reader.
-- **Scoped Namespace:** Extensions install into `/<Type>/<REPO_OWNER>/<EXTENSION>.js` (e.g. `/Anime/TheYogMehta/pahe.js`). Multiple creators can develop an extension for the same website without naming collisions.
+- **Scoped Namespace:** Extensions install into `/<Type>/<REPO_OWNER>/<EXTENSION>.js` (e.g. `/Anime/TheYogMehta/pahe.js` or `/Anime/communitydev/coolanime.js`).
+  - **Community / Unofficial Extensions:** All community extensions are strictly scoped and registered as `@<REPO_OWNER>/<EXTENSION>` (e.g. `@communitydev/coolanime`). In databases, catalogs, and unmapped metadata reports, they are always referenced under `@<REPO_OWNER>/<EXTENSION>`.
+  - **Official Extensions:** Only extensions maintained in the official repository (`TheYogMehta/extensions`) are exposed via bare top-level identifiers (e.g. `pahe`, `anikoto`).
 
 ---
 
@@ -79,12 +82,12 @@ Placed at the root of your repository, `marketplace.json` tells StrawVerse what 
 
 ### Fields
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `name` | string | Yes | Internal identifier of the extension (must match the filename without `.js`). |
-| `version` | string | Yes | Semver version (e.g., `"1.0.0"`). Increasing this prompts users with an **Update** button. |
-| `MinAppVersion` | string | No | Minimum StrawVerse version supported (e.g., `"11.0.0"`). |
-| `disabled` | boolean | No | Set to `true` if the scraper is broken or undergoing maintenance. |
+| Field           | Type    | Required | Description                                                                                |
+| --------------- | ------- | -------- | ------------------------------------------------------------------------------------------ |
+| `name`          | string  | Yes      | Internal identifier of the extension (must match the filename without `.js`).              |
+| `version`       | string  | Yes      | Semver version (e.g., `"1.0.0"`). Increasing this prompts users with an **Update** button. |
+| `MinAppVersion` | string  | No       | Minimum StrawVerse version supported (e.g., `"11.0.0"`).                                   |
+| `disabled`      | boolean | No       | Set to `true` if the scraper is broken or undergoing maintenance.                          |
 
 Icons are automatically resolved from your repository's `ico/` directory (e.g. `ico/<name>.ico`).
 
@@ -354,7 +357,7 @@ if (typeof global.registerStreamHeaders === "function") {
 
 StrawVerse features an automated Cloudflare clearance solver. If a target site or its video host has anti-bot challenges, declare them in your scraper:
 
-````javascript
+```javascript
 module.exports = {
   name: "mysite",
   version: "1.0.0",
@@ -363,11 +366,7 @@ module.exports = {
   bypassDomains: ["mysite.to", "streamserver.cx"],
 
   // Share cookies across mirrors / CDNs
-  cookieDomains: [
-    "mysite.to",
-    "mysite.pw",
-    "mysitecdn.com",
-  ],
+  cookieDomains: ["mysite.to", "mysite.pw", "mysitecdn.com"],
 
   // Map CDNs to parent domain clearance
   domainAliases: {
@@ -379,25 +378,102 @@ module.exports = {
     return title.includes("MySite") && !html.includes("cf-challenge");
   },
 };
+```
+
 ---
 
-## 9. Security Restrictions & Sandbox
+## 9. Standard Media Info Response & Automatic Mapping
 
-To protect StrawVerse users against malicious code, all extensions undergo **static security analysis** prior to installation and **runtime sandbox enforcement** during execution:
+StrawVerse automatically connects provider titles with canonical MyAnimeList (MAL) records using the centralized mapping database (`mapping.db`).
 
+- **Clean Local Metadata:** Titles mapped to MAL show official covers, seasonal releases, genres, and airing schedules directly from MyAnimeList without duplicate database bloat.
+- **Provider-Exclusive Catalog:** Series not available on MyAnimeList appear dynamically under the **Unique to &lt;Provider&gt;** dropdown.
+- **Automated Catalog Sync:** StrawVerse core automatically handles unmapped series detection, caching in `unmapped_items`, and reporting to the central catalog server. **Extensions do NOT need to write boilerplate code or manage database tables.**
+
+---
+
+### 1. Standard Info Response Format
+
+Your `AnimeInfo(id)` or `MangaInfo(id)` function should return an object containing the standard metadata fields. StrawVerse uses these fields to populate the UI and handle catalog synchronization. Any extra properties not in this list will simply be ignored:
+
+```javascript
+async function AnimeInfo(id) {
+  return {
+    id: id, // String: Unique identifier or slug on the source site
+    title: "Chainsaw Man", // String: Main display title
+    image: "https://example.com/poster.jpg", // String: Vertical poster image URL
+    type: "TV", // String: "TV" | "Movie" | "OVA" | "ONA" | "Special" | "Manga" | "Manhwa"
+    description: "Denji is a teenage boy...", // String: Plot summary / synopsis
+    genres: ["Action", "Supernatural"], // Array<String>: List of genre tags
+    status: "Completed", // String: "Ongoing" | "Completed" | "Upcoming"
+    season: "Fall", // String: "Winter" | "Spring" | "Summer" | "Fall" (optional)
+    year: 2022, // Number/String: Release year (optional)
+    episodes: 12, // Number or Array of episode objects
+    chapters: 150, // Number or Array of chapter objects (for Manga)
+    aired: "Oct 12, 2022 to Dec 28, 2022", // String: Broadcast date range (optional)
+    studio: "MAPPA", // String: Production studio (or author/artist for Manga)
+    duration: "24 min per ep", // String: Episode runtime (optional)
+    malid: 44511, // Number: (Optional) Pre-linked MyAnimeList ID if site links to MAL
+  };
+}
+```
+
+> **Note on `MappingRules`:** Because all extensions return this standardized info object. StrawVerse automatically reads the standard fields directly from the response.
+
+---
+
+### 2. Edge Case Support: `onInfoFetched` & Scoped Storage (Optional)
+
+For 99% of extensions, no extra hooks are needed. However, if your extension handles unique provider edge cases (such as AnimePahe's rotating UUIDs or custom token sessions), you can optionally implement `onInfoFetched({ id, info, api })`:
+
+```javascript
+// OPTIONAL: Only needed for complex provider edge cases (e.g. rotating UUIDs)
+async function onInfoFetched({ id, info, api }) {
+  if (!id || !info || !api) return;
+  try {
+    // Check if the item has an established MAL mapping
+    const isMapped = await api.isMapped(id);
+    const mappedMalId = await api.getMappedMalId(id);
+
+    // Report or update custom provider-specific mapping relations
+    if (info.malid && mappedMalId !== info.malid) {
+      await api.reportMapping({
+        uuid: id,
+        id: info.dataId,
+        malid: info.malid,
+        name: info.title,
+      });
+    }
+  } catch (_) {}
+}
+```
+
+Extensions can also safely store extension-specific state via `getExtensionDb(providerName, repoOwner)`:
+
+- Scoped tables (e.g. `@"repoOwner/providerName"`) guarantee isolated storage without collisions.
+- Settings key-value pairs can be saved and retrieved via `getSetting(key)` and `setSetting(key, value)`.
+
+---
+
+## 10. Security Restrictions & Sandbox
+
+To protect StrawVerse users against malicious code and data tampering, all extensions undergo **static security analysis** prior to installation and **runtime sandbox enforcement** during execution:
+
+- ❌ **Zero Database Access:** Extensions cannot access database instances (`global.db`, `global.mappingDb`) or require database modules
 - ❌ **Prohibited Modules:** You cannot require `child_process`, `fs`, `worker_threads`, `cluster`, `electron`, `vm`, or `v8`.
 - ❌ **Process Manipulation:** `process.exit()`, `process.kill()`, `process.abort()`, and `process.binding()` are strictly blocked.
+- 🔒 **Namespace Isolation:** Unofficial extensions are strictly namespaced as `@<username>/<extension>` in all catalogs and storage, preventing provider impersonation.
 - ✅ **Safe Allowed Modules:**
   - `cheerio` (HTML parsing)
   - `axios` (HTTP requests)
   - `crypto` (Hashing, MD5, SHA256, AES)
   - `buffer`, `url`, `querystring`, `path`, `stream`, `zlib`, `events`, `util`
 
-Any extension violating these rules will be rejected with a `Security Verification Failed` error.
+Any extension violating these security rules will be rejected with a `Security Verification Failed` error.
 
 ---
 
-## 10. Publishing & Adding Your Repo to StrawVerse
+## 11. Publishing & Adding Your Repo to StrawVerse
 
 1. Push your repository to GitHub:
    ```bash
@@ -407,7 +483,9 @@ Any extension violating these rules will be rejected with a `Security Verificati
    git branch -M main
    git remote add origin https://github.com/<your-username>/<your-repo-name>.git
    git push -u origin main
-````
+   ```
+
+```
 
 2. In StrawVerse:
    - Navigate to **Extensions** (Marketplace).
@@ -415,3 +493,4 @@ Any extension violating these rules will be rejected with a `Security Verificati
    - Enter your repository URL (e.g., `https://github.com/<your-username>/<your-repo-name>`).
    - Click **Add Repository**.
 3. All extensions in your repository will immediately appear in the marketplace labeled with `@<your-username>`! Users can click **Install Scraper** to begin using your extensions.
+```

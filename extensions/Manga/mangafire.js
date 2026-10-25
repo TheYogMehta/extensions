@@ -114,6 +114,7 @@ async function fetchMangaInfo(mangaId) {
       author,
       type: "Manga",
       released: String(m?.attributes?.year || ""),
+      year: m?.attributes?.year ? parseInt(m.attributes.year, 10) : null,
       status: m?.attributes?.status || "Ongoing",
     };
   } catch (err) {
@@ -173,7 +174,7 @@ async function fetchChapterPages(chapterId) {
 
 module.exports = {
   name: "mangafire",
-  version: "2.0.0",
+  version: "3.0.0",
   baseUrl: "https://mangafire.to",
   headerRules: [
     {
