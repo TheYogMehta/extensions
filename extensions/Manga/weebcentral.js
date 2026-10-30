@@ -25,8 +25,85 @@
 const cheerio = require("cheerio");
 const baseUrl = "https://weebcentral.com";
 
-async function latestManga(page = 1) {
+const SEARCH_SORTS = [
+  "Best Match",
+  "Alphabet",
+  "Popularity",
+  "Subscribers",
+  "Recently Added",
+  "Latest Updates",
+];
+const SEARCH_ORDERS = ["Ascending", "Descending"];
+
+function parseSearchArticles($) {
+  const results = [];
+
+  $("body article").each((index, article) => {
+    const Manga = $(article).find("section").eq(0);
+    if (Manga.length > 0) {
+      let id = Manga.find("a").attr("href");
+      if (id?.includes("/series/")) {
+        id = id.split("/series/")?.[1].split("/")?.[0];
+        if (id) {
+          const MangaArticle = Manga?.find("article")?.eq(1);
+          if (MangaArticle?.length > 0) {
+            const image = MangaArticle?.find("picture > img")?.attr("src");
+            const title = MangaArticle?.find(".text-ellipsis")
+              ?.first()
+              ?.text()
+              ?.replaceAll("\n", "")
+              ?.trim();
+
+            if (title && image) {
+              results.push({
+                id: id,
+                title: title,
+                image: image,
+              });
+            }
+          }
+        }
+      }
+    }
+  });
+
+  return results;
+}
+
+async function fetchSearchPage({ text = "", sort, order, page = 1 }) {
+  const safeSort = SEARCH_SORTS.includes(sort) ? sort : "Latest Updates";
+  const safeOrder = SEARCH_ORDERS.includes(order) ? order : "Descending";
+  const offset = (page - 1) * 32;
+
+  const { data } = await global.axios.get(
+    `${baseUrl}/search/data?limit=32&offset=${offset}&text=${encodeURIComponent(
+      text,
+    )}&sort=${encodeURIComponent(safeSort)}&order=${encodeURIComponent(
+      safeOrder,
+    )}&official=Any&anime=Any&adult=Any&display_mode=Full+Display`,
+  );
+
+  const $ = cheerio.load(data);
+  return { $, results: parseSearchArticles($) };
+}
+
+async function latestManga(page = 1, filters = {}) {
   try {
+    // Filtered discovery goes through the search endpoint (empty query)
+    // which supports sort + order; unfiltered keeps latest-updates.
+    if (filters?.sort || filters?.order) {
+      const { $, results } = await fetchSearchPage({
+        sort: filters.sort,
+        order: filters.order,
+        page,
+      });
+      return {
+        current_page: page,
+        hasNextPage: $("button[hx-get]").length > 0,
+        results,
+      };
+    }
+
     const { data } = await global.axios.get(
       `${baseUrl}/latest-updates/${page}`,
     );
@@ -70,45 +147,11 @@ async function latestManga(page = 1) {
 
 async function searchManga(query, page = 1) {
   try {
-    const offset = (page - 1) * 32;
-
-    const { data } = await global.axios.get(
-      `${baseUrl}/search/data?limit=32&offset=${offset}&text=${encodeURIComponent(
-        query,
-      )}&sort=Best+Match&order=Ascending&official=Any&anime=Any&adult=Any&display_mode=Full+Display`,
-    );
-
-    const $ = cheerio.load(data);
-
-    const results = [];
-
-    $("body article").each((_, article) => {
-      const Manga = $(article).find("section").eq(0);
-      if (Manga.length > 0) {
-        let id = Manga.find("a").attr("href");
-        if (id?.includes("/series/")) {
-          id = id.split("/series/")?.[1].split("/")?.[0];
-          if (id) {
-            const MangaArticle = Manga?.find("article")?.eq(1);
-            if (MangaArticle?.length > 0) {
-              const image = MangaArticle?.find("picture > img")?.attr("src");
-              const title = MangaArticle?.find(".text-ellipsis")
-                ?.first()
-                ?.text()
-                ?.replaceAll("\n", "")
-                ?.trim();
-
-              if (title && image) {
-                results.push({
-                  id: id,
-                  title: title,
-                  image: image,
-                });
-              }
-            }
-          }
-        }
-      }
+    const { $, results } = await fetchSearchPage({
+      text: query,
+      sort: "Best Match",
+      order: "Ascending",
+      page,
     });
 
     return {
@@ -266,7 +309,7 @@ async function fetchChapterPages(chapterId) {
 
 module.exports = {
   name: "weebcentral",
-  version: "4.0.0",
+  version: "4.1.0",
   baseUrl,
   headerRules: [
     {
