@@ -223,12 +223,26 @@ async function fetchRecentEpisodes(filters = {}) {
       filters?.keyword !== undefined && filters?.keyword !== null
         ? String(filters.keyword)
         : "";
+    const language = String(filters?.language || "").toLowerCase();
+    const hasLanguage = language === "sub" || language === "dub";
+    const mediaType = filters?.type ? String(filters.type) : "";
+    const hasType = [
+      "TV",
+      "TV_SHORT",
+      "TV Special",
+      "Movie",
+      "ONA",
+      "OVA",
+      "Special",
+      "Music",
+    ].includes(mediaType);
     let url;
     if (
       !keyword &&
       genreIds.length === 0 &&
       !status &&
-      !filters?.type &&
+      !hasType &&
+      !hasLanguage &&
       !filters?.sort
     ) {
       // Legacy default view (latest updated) when no filters are set.
@@ -239,8 +253,9 @@ async function fetchRecentEpisodes(filters = {}) {
       for (const gid of genreIds) {
         params.append("genre[]", String(gid));
       }
-      if (filters?.type) params.append("type", String(filters.type));
+      if (hasType) params.append("term_type[]", mediaType);
       if (status) params.append("status[]", status);
+      if (hasLanguage) params.append("language[]", language);
       if (filters?.sort) params.append("sort", String(filters.sort));
       params.append("page", String(page));
       url = `${baseUrl}/filter?${params.toString()}`;
@@ -735,7 +750,7 @@ async function fetchEpisodeSources(episodeIdStr, category = null) {
 
 module.exports = {
   name: "anikoto",
-  version: "7.0.0",
+  version: "7.1.0",
   baseUrl,
   headerRules: [
     {

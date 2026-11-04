@@ -27,15 +27,33 @@ const cheerio = require("cheerio");
 
 // variables
 // Mirror priority: hosts that may serve the real API behind Cloudflare
-// (403 to bots, solvable via in-app CF bypass) come BEFORE known
-// safeGet validates response SHAPE, so dead/clone mirrors are skipped
-// automatically instead of silently poisoning results.
+// (403 to bots, solvable via in-app CF bypass) come first; .pw is the
+// proven API host and stays at the front. safeGet validates response
+// SHAPE, so dead/clone mirrors are skipped automatically instead of
+// silently poisoning results.
 const baseUrls = [
   "https://animepahe.pw",
   "https://animepahe.com",
   "https://animepahe.org",
 ];
 let baseUrl = baseUrls[0];
+
+// Hosts that recently failed are tried last for a while, so one dead
+// mirror can't stall every call.
+const mirrorCooldownUntil = {};
+const MIRROR_COOLDOWN_MS = 5 * 60 * 1000;
+
+function markMirrorDown(base) {
+  try {
+    mirrorCooldownUntil[String(base)] = Date.now() + MIRROR_COOLDOWN_MS;
+  } catch (_) {}
+}
+
+function markMirrorOk(base) {
+  try {
+    delete mirrorCooldownUntil[String(base)];
+  } catch (_) {}
+}
 
 function swapBase(url, base) {
   return String(url).replace(/https:\/\/animepahe\.[a-z]+/i, base);
@@ -65,7 +83,17 @@ function getBaseVariants(url) {
       out.push(v);
     }
   }
-  return out;
+  const now = Date.now();
+  const fresh = [];
+  const cooling = [];
+  for (const v of out) {
+    const host = (/https:\/\/animepahe\.[a-z]+/i.exec(v) || [])[0] || v;
+    (mirrorCooldownUntil[host] && mirrorCooldownUntil[host] > now
+      ? cooling
+      : fresh
+    ).push(v);
+  }
+  return [...fresh, ...cooling];
 }
 
 function notifyRenderer(channel, payload) {
@@ -416,6 +444,10 @@ async function safeGet(url, config = {}, maxRetries = 5, opts = {}) {
   const expectJson = !!opts.expectJson;
   let lastErr = null;
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const u = new URL(url);
+      console.log(`[AnimePahe] GET ${u.hostname}${u.pathname} (attempt ${attempt}/${maxRetries})`);
+    } catch (_) {}
     const now = Date.now();
     const timeSinceLast = now - lastRequestTime;
     if (timeSinceLast < MIN_REQUEST_INTERVAL) {
@@ -473,6 +505,7 @@ async function safeGet(url, config = {}, maxRetries = 5, opts = {}) {
             console.warn(
               `[AnimePahe] ${tryBase} returned non-API payload, trying next mirror...`,
             );
+            markMirrorDown(tryBase);
             lastErr = Object.assign(
               new Error(`Invalid API response from ${tryBase}`),
               { code: "BAD_MIRROR" },
@@ -523,6 +556,7 @@ async function safeGet(url, config = {}, maxRetries = 5, opts = {}) {
 
         // success -> remember working base
         baseUrl = tryBase;
+        markMirrorOk(tryBase);
         notifyRenderer("catalog-loading-status", {
           text: "",
         });
@@ -533,6 +567,7 @@ async function safeGet(url, config = {}, maxRetries = 5, opts = {}) {
         if (status === 404) {
           // Try remaining mirrors before surfacing 404 (preserves the
           // UUID auto-heal flow when every mirror agrees it is missing).
+          markMirrorDown(tryBase);
           console.warn(`[AnimePahe] 404 on ${tryBase}, trying next mirror...`);
           continue;
         }
@@ -549,6 +584,7 @@ async function safeGet(url, config = {}, maxRetries = 5, opts = {}) {
               "ECONNREFUSED",
             ].some((c) => String(err?.code || err?.message || "").includes(c)));
         if (isMirrorDown) {
+          markMirrorDown(tryBase);
           console.warn(
             `[AnimePahe] Mirror ${tryBase} is down (${err?.code || status || "Network"}), trying next mirror...`,
           );
@@ -1347,7 +1383,7 @@ function extractQualityNumber(qualityString) {
 }
 
 // helpers for extracting video links
-async function extract(videoUrl, retries = 2, delay = 1000) {
+async function extract(videoUrl, retries = 3, delay = 1000) {
   let sources = [];
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
@@ -1367,12 +1403,9 @@ async function extract(videoUrl, retries = 2, delay = 1000) {
       });
       return sources;
     } catch (err) {
-      if (
-        (err.response?.status === 429 || err.message.includes("429")) &&
-        attempt < retries
-      ) {
+      if (attempt < retries) {
         console.warn(
-          `Request to ${videoUrl.href} returned 429. Retrying in ${delay}ms (attempt ${attempt}/${retries})...`,
+          `Resolving ${videoUrl.href} failed (${err.response?.status || err.message}). Retrying in ${delay}ms (attempt ${attempt}/${retries})...`,
         );
         await new Promise((resolve) => setTimeout(resolve, delay));
         delay *= 2;
@@ -1663,7 +1696,7 @@ async function onInfoFetched({ id, info, api }) {
 
 module.exports = {
   name: "pahe",
-  version: "7.0.1",
+  version: "7.0.2",
   baseUrl,
   headerRules: [
     {
