@@ -446,7 +446,9 @@ async function safeGet(url, config = {}, maxRetries = 5, opts = {}) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       const u = new URL(url);
-      console.log(`[AnimePahe] GET ${u.hostname}${u.pathname} (attempt ${attempt}/${maxRetries})`);
+      console.log(
+        `[AnimePahe] GET ${u.hostname}${u.pathname} (attempt ${attempt}/${maxRetries})`,
+      );
     } catch (_) {}
     const now = Date.now();
     const timeSinceLast = now - lastRequestTime;
@@ -1658,10 +1660,15 @@ async function onInfoFetched({ id, info, api }) {
 
     if (!isMapped) {
       // Unmapped series: persist metadata in mapping.db and report to server
-      if (typeof api.saveUnmapped === "function") {
+      const validTitle = (info.title || "").trim();
+      if (
+        validTitle &&
+        validTitle.toLowerCase() !== "unknown" &&
+        typeof api.saveUnmapped === "function"
+      ) {
         await api.saveUnmapped({
           id,
-          name: info.title || "Unknown",
+          name: validTitle,
           image_url: info.image || null,
           type: info.type || "TV",
           episodes: info.episodes ? String(info.episodes) : null,
@@ -1696,7 +1703,7 @@ async function onInfoFetched({ id, info, api }) {
 
 module.exports = {
   name: "pahe",
-  version: "7.0.2",
+  version: "7.0.3",
   baseUrl,
   headerRules: [
     {
