@@ -8,7 +8,7 @@
     },
     {
       "name": "pahe",
-      "version": "7.0.3",
+      "version": "7.0.4",
       "MinAppVersion": "11.1.0",
       "disabled": false
     }
@@ -29,7 +29,7 @@
     },
     {
       "name": "comix",
-      "version": "3.0.0",
+      "version": "3.1.0",
       "MinAppVersion": "11.1.0",
       "disabled": false
     },

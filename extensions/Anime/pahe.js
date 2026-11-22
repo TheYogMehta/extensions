@@ -26,75 +26,7 @@
 const cheerio = require("cheerio");
 
 // variables
-// Mirror priority: hosts that may serve the real API behind Cloudflare
-// (403 to bots, solvable via in-app CF bypass) come first; .pw is the
-// proven API host and stays at the front. safeGet validates response
-// SHAPE, so dead/clone mirrors are skipped automatically instead of
-// silently poisoning results.
-const baseUrls = [
-  "https://animepahe.pw",
-  "https://animepahe.com",
-  "https://animepahe.org",
-];
-let baseUrl = baseUrls[0];
-
-// Hosts that recently failed are tried last for a while, so one dead
-// mirror can't stall every call.
-const mirrorCooldownUntil = {};
-const MIRROR_COOLDOWN_MS = 5 * 60 * 1000;
-
-function markMirrorDown(base) {
-  try {
-    mirrorCooldownUntil[String(base)] = Date.now() + MIRROR_COOLDOWN_MS;
-  } catch (_) {}
-}
-
-function markMirrorOk(base) {
-  try {
-    delete mirrorCooldownUntil[String(base)];
-  } catch (_) {}
-}
-
-function swapBase(url, base) {
-  return String(url).replace(/https:\/\/animepahe\.[a-z]+/i, base);
-}
-
-function isCloneHtml(data) {
-  if (typeof data !== "string") return false;
-  return (
-    data.includes("wp-content") ||
-    data.includes("yoast") ||
-    data.includes("WordPress") ||
-    /<html[^>]*lang="en-US"[^>]*>\s*<head[^>]*>\s*<meta http-equiv="Content-Type"/i.test(
-      data.slice(0, 2000),
-    )
-  );
-}
-
-function getBaseVariants(url) {
-  if (!/animepahe/i.test(String(url))) return [String(url)];
-  const seen = new Set();
-  const out = [];
-  // current working base first
-  for (const b of [baseUrl, ...baseUrls]) {
-    const v = swapBase(url, b);
-    if (!seen.has(v)) {
-      seen.add(v);
-      out.push(v);
-    }
-  }
-  const now = Date.now();
-  const fresh = [];
-  const cooling = [];
-  for (const v of out) {
-    const host = (/https:\/\/animepahe\.[a-z]+/i.exec(v) || [])[0] || v;
-    (mirrorCooldownUntil[host] && mirrorCooldownUntil[host] > now
-      ? cooling
-      : fresh
-    ).push(v);
-  }
-  return [...fresh, ...cooling];
-}
+const baseUrl = "https://animepahe.pw";
 
 function notifyRenderer(channel, payload) {
   if (typeof global.sendToRenderer === "function") {
@@ -164,8 +96,8 @@ async function resolvePaheUuid(id) {
   if (db) {
     try {
       const row = await db
-        .prepare("SELECT uuid FROM pahe WHERE id = ? LIMIT 1")
-        .get(cleanId);
+        .prepare("SELECT uuid FROM pahe WHERE id = ? OR malid = ? LIMIT 1")
+        .get(cleanId, cleanId);
       if (row?.uuid && isValidPaheUuid(row.uuid)) {
         return row.uuid.trim().toLowerCase();
       }
@@ -175,8 +107,8 @@ async function resolvePaheUuid(id) {
   if (global.mappingDb) {
     try {
       const row = global.mappingDb
-        .prepare("SELECT uuid FROM pahe WHERE id = ? LIMIT 1")
-        .get(cleanId);
+        .prepare("SELECT uuid FROM pahe WHERE id = ? OR malid = ? LIMIT 1")
+        .get(cleanId, cleanId);
       if (row?.uuid && isValidPaheUuid(row.uuid)) {
         return row.uuid.trim().toLowerCase();
       }
@@ -242,32 +174,6 @@ async function syncPaheDirectory(
         );
         html = typeof catalogRes?.data === "string" ? catalogRes.data : "";
       } catch (_) {}
-    }
-
-    // 3. Fallback to mirrors
-    if (!html) {
-      const mirrors = [
-        "https://animepahe.pw",
-        "https://animepahe.org",
-        "https://animepahe.com",
-      ];
-      for (const m of mirrors) {
-        if (m === baseUrl) continue;
-        try {
-          if (typeof global.scrapperFetch === "function") {
-            html = await global.scrapperFetch(`${m}/anime`);
-          }
-          if (!html) {
-            const res = await safeGet(
-              `${m}/anime`,
-              { skipDirectorySync: true },
-              1,
-            );
-            html = typeof res?.data === "string" ? res.data : "";
-          }
-          if (html && html.includes("/anime/")) break;
-        } catch (_) {}
-      }
     }
 
     if (!html) {
@@ -447,7 +353,7 @@ async function safeGet(url, config = {}, maxRetries = 5, opts = {}) {
     try {
       const u = new URL(url);
       console.log(
-        `[AnimePahe] GET ${u.hostname}${u.pathname} (attempt ${attempt}/${maxRetries})`,
+        `[AnimePahe] GET ${u.hostname}${u.pathname}${u.search || ""} (attempt ${attempt}/${maxRetries})`,
       );
     } catch (_) {}
     const now = Date.now();
@@ -459,157 +365,111 @@ async function safeGet(url, config = {}, maxRetries = 5, opts = {}) {
     }
     lastRequestTime = Date.now();
 
-    const variants = getBaseVariants(url);
-    for (const tryUrl of variants) {
-      const tryBase =
-        (/https:\/\/animepahe\.[a-z]+/i.exec(tryUrl) || [])[0] || baseUrl;
-      const isApi = tryUrl.includes("/api?");
-      const mergedHeaders = {
-        Referer: tryBase + "/",
-        ...(isApi
-          ? {
-              "X-Requested-With": "XMLHttpRequest",
-              Accept: "application/json, text/javascript, */*; q=0.01",
-            }
-          : {
-              Accept:
-                "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-            }),
-        ...(config.headers || {}),
-      };
-      const reqConfig = {
-        ...config,
-        headers: mergedHeaders,
-      };
-
-      try {
-        const response = await global.axios.get(tryUrl, reqConfig);
-        let data = response?.data;
-
-        if (isApi && typeof data === "string") {
-          try {
-            data = JSON.parse(data);
-            response.data = data;
-          } catch (_) {}
-        }
-
-        // Mirror validation: clones squat animepahe domains and return 200 +
-        // WordPress HTML (or JS shells). Without shape checks that poison
-        // silently becomes empty search/episode/source lists downstream.
-        if (expectJson) {
-          const looksJson =
-            data &&
-            typeof data === "object" &&
-            (Array.isArray(data.data) ||
-              typeof data.total !== "undefined" ||
-              typeof data.last_page !== "undefined");
-          if (!looksJson) {
-            console.warn(
-              `[AnimePahe] ${tryBase} returned non-API payload, trying next mirror...`,
-            );
-            markMirrorDown(tryBase);
-            lastErr = Object.assign(
-              new Error(`Invalid API response from ${tryBase}`),
-              { code: "BAD_MIRROR" },
-            );
-            continue; // next variant
+    const isApi = url.includes("/api?");
+    const mergedHeaders = {
+      Referer: baseUrl + "/",
+      ...(isApi
+        ? {
+            "X-Requested-With": "XMLHttpRequest",
+            Accept: "application/json, text/javascript, */*; q=0.01",
           }
-        } else if (typeof data === "string" && isCloneHtml(data)) {
-          console.warn(
-            `[AnimePahe] ${tryBase} looks like a clone site, trying next mirror...`,
+        : {
+            Accept:
+              "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+          }),
+      ...(config.headers || {}),
+    };
+    const reqConfig = {
+      ...config,
+      headers: mergedHeaders,
+    };
+
+    try {
+      const response = await global.axios.get(url, reqConfig);
+      let data = response?.data;
+
+      if (isApi && typeof data === "string") {
+        try {
+          data = JSON.parse(data);
+          response.data = data;
+        } catch (_) {}
+      }
+
+      if (expectJson) {
+        const looksJson =
+          data &&
+          typeof data === "object" &&
+          (Array.isArray(data.data) ||
+            typeof data.total !== "undefined" ||
+            typeof data.last_page !== "undefined");
+        if (!looksJson) {
+          throw Object.assign(
+            new Error("Invalid API response from AnimePahe"),
+            {
+              code: "BAD_RESPONSE",
+            },
           );
-          lastErr = Object.assign(new Error(`Clone site at ${tryBase}`), {
-            code: "BAD_MIRROR",
-          });
-          continue; // next variant
         }
+      }
 
-        const isRateLimited =
-          response?.status === 429 ||
-          data?.status === 429 ||
-          data?.error_code === 1015 ||
-          data?.title?.includes("rate limited") ||
-          (typeof data === "string" &&
-            (data.includes("error code: 1015") ||
-              data.includes("rate limited")));
+      const isRateLimited =
+        response?.status === 429 ||
+        data?.status === 429 ||
+        data?.error_code === 1015 ||
+        data?.title?.includes("rate limited") ||
+        (typeof data === "string" &&
+          (data.includes("error code: 1015") || data.includes("rate limited")));
 
-        if (isRateLimited) {
-          if (attempt < maxRetries) {
-            const totalWaitSecs =
-              Math.max(4, Math.ceil(data?.retry_after || 4)) * attempt;
-            console.warn(
-              `[AnimePahe] Rate limited (Attempt ${attempt}/${maxRetries}). Waiting ${totalWaitSecs}s...`,
-            );
-            for (let sec = totalWaitSecs; sec > 0; sec--) {
-              notifyRenderer("catalog-loading-status", {
-                text: `Rate limited by AnimePahe. Retrying in ${sec}s...`,
-              });
-              await new Promise((resolve) => setTimeout(resolve, 1000));
-            }
+      if (isRateLimited) {
+        if (attempt < maxRetries) {
+          const totalWaitSecs =
+            Math.max(4, Math.ceil(data?.retry_after || 4)) * attempt;
+          console.warn(
+            `[AnimePahe] Rate limited (Attempt ${attempt}/${maxRetries}). Waiting ${totalWaitSecs}s...`,
+          );
+          for (let sec = totalWaitSecs; sec > 0; sec--) {
             notifyRenderer("catalog-loading-status", {
-              text: "Retrying AnimePahe fetch...",
+              text: `Rate limited by AnimePahe. Retrying in ${sec}s...`,
             });
+            await new Promise((resolve) => setTimeout(resolve, 1000));
           }
-          lastErr = Object.assign(new Error("Rate limited"), {
-            response: { status: 429 },
+          notifyRenderer("catalog-loading-status", {
+            text: "Retrying AnimePahe fetch...",
           });
-          break; // backoff done above, outer retry (skips extra wait via status check)
         }
-
-        // success -> remember working base
-        baseUrl = tryBase;
-        markMirrorOk(tryBase);
-        notifyRenderer("catalog-loading-status", {
-          text: "",
+        lastErr = Object.assign(new Error("Rate limited"), {
+          response: { status: 429 },
         });
-        return response;
-      } catch (err) {
-        lastErr = err;
-        const status = err.response?.status;
-        if (status === 404) {
-          // Try remaining mirrors before surfacing 404 (preserves the
-          // UUID auto-heal flow when every mirror agrees it is missing).
-          markMirrorDown(tryBase);
-          console.warn(`[AnimePahe] 404 on ${tryBase}, trying next mirror...`);
-          continue;
-        }
-        // Only switch mirrors if the host is unreachable / down, NOT on 403 Cloudflare challenge!
-        const isMirrorDown =
-          status === 502 ||
-          status === 504 ||
-          (!status &&
-            [
-              "ENOTFOUND",
-              "EAI_AGAIN",
-              "ECONNRESET",
-              "ETIMEDOUT",
-              "ECONNREFUSED",
-            ].some((c) => String(err?.code || err?.message || "").includes(c)));
-        if (isMirrorDown) {
-          markMirrorDown(tryBase);
-          console.warn(
-            `[AnimePahe] Mirror ${tryBase} is down (${err?.code || status || "Network"}), trying next mirror...`,
-          );
-          continue; // next variant
-        }
-        break; // 403 or other response -> stay on current mirror
+        continue;
+      }
+
+      notifyRenderer("catalog-loading-status", {
+        text: "",
+      });
+      return response;
+    } catch (err) {
+      lastErr = err;
+      const status = err.response?.status;
+      if (status === 404) {
+        throw err;
       }
     }
+
     if (attempt < maxRetries) {
       const status = lastErr?.response?.status;
+      if (status === 404) {
+        throw lastErr;
+      }
       if (status === 429) {
         continue; // already waited above
       }
-      const totalWaitSecs = status === 429 ? 8 * attempt : 3 * attempt;
+      const totalWaitSecs = 3 * attempt;
       console.warn(
         `[AnimePahe] HTTP ${status || "Error"}. Waiting ${totalWaitSecs}s before retry ${attempt}/${maxRetries}...`,
       );
       for (let sec = totalWaitSecs; sec > 0; sec--) {
         notifyRenderer("catalog-loading-status", {
-          text:
-            status === 429
-              ? `Rate limited by AnimePahe. Retrying in ${sec}s...`
-              : `Retrying AnimePahe in ${sec}s...`,
+          text: `Retrying AnimePahe in ${sec}s...`,
         });
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
@@ -1189,6 +1049,9 @@ const firstEpCache = {};
 
 async function getFirstEpisodeNumber(id, lastPage) {
   const targetUuid = await resolvePaheUuid(id);
+  if (!isValidPaheUuid(targetUuid)) {
+    return 1;
+  }
   if (firstEpCache[targetUuid] !== undefined) {
     return firstEpCache[targetUuid];
   }
@@ -1219,6 +1082,14 @@ async function getFirstEpisodeNumber(id, lastPage) {
 async function fetchEpisode(id, page = 1) {
   try {
     const targetUuid = await resolvePaheUuid(id);
+    if (!isValidPaheUuid(targetUuid)) {
+      return {
+        episodes: [],
+        totalPages: 0,
+        total: 0,
+        currentPage: page,
+      };
+    }
     let episodes = [];
     const resp = await safeGet(
       `${baseUrl}/api?m=release&id=${targetUuid}&sort=episode_desc&page=${page}`,
@@ -1703,7 +1574,7 @@ async function onInfoFetched({ id, info, api }) {
 
 module.exports = {
   name: "pahe",
-  version: "7.0.3",
+  version: "7.0.4",
   baseUrl,
   headerRules: [
     {
@@ -1750,12 +1621,7 @@ module.exports = {
     },
   ],
   bypassDomains: ["animepahe", "kwik.cx"],
-  cookieDomains: [
-    "animepahe.pw",
-    "animepahe.com",
-    "animepahe.org",
-    "anipixcdn",
-  ],
+  cookieDomains: ["animepahe.pw", "anipixcdn"],
   domainAliases: {
     "owocdn.top": "kwik.cx",
     "uwucdn.top": "kwik.cx",
